@@ -10,5 +10,5 @@ class UserSkill(Base):
     skill_id = Column(Integer, ForeignKey("skills.id", ondelete="CASCADE"))
     proficiency = Column(String, nullable=False)  # 예: 초급, 중급, 고급
 
-    user = relationship("User", back_populates="skills")
+    user = relationship("User", back_populates="user_skills")
     skill = relationship("Skill", back_populates="users")

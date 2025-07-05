@@ -10,5 +10,5 @@ class UserRoadmap(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     roadmaps_id = Column(Integer, ForeignKey("roadmaps.id", ondelete="CASCADE"), nullable=False)
 
-    user = relationship("User", back_populates="roadmaps")
+    user = relationship("User", back_populates="user_roadmaps")
     roadmap = relationship("Roadmap", back_populates="users")

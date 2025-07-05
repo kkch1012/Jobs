@@ -2,10 +2,20 @@ from pydantic import BaseModel, EmailStr, Field
 from datetime import date, datetime
 from typing import Optional, List, Dict
 
-# 회원가입 시 받을 필드
-class UserCreate(BaseModel):
-    email: EmailStr
+# ID 기반 회원가입용
+class UserCreateID(BaseModel):
+    email: str
     password: str
+    confirm_password: str
+    nickname: str
+    name: str
+    phone_number: str
+    birth_date: date
+    gender: str
+
+# 이메일 기반 (소셜 로그인) 회원가입용
+class UserCreateEmail(BaseModel):
+    email: EmailStr
     nickname: str
     name: str
     phone_number: str

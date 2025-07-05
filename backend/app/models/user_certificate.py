@@ -10,5 +10,5 @@ class UserCertificate(Base):
     certificate_id = Column(Integer, ForeignKey("certificates.id", ondelete="CASCADE"))
     acquired_date = Column(Date, nullable=False)
 
-    user = relationship("User", back_populates="certificates")
+    user = relationship("User", back_populates="user_certificates")
     certificate = relationship("Certificate", back_populates="users")

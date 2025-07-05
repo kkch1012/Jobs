@@ -4,6 +4,7 @@ from app.database.PostgreSQL import Base
 
 class JobRequiredSkill(Base):
     __tablename__ = "job_required_skill"
+    
     id = Column(Integer, primary_key=True, index=True)
     job_name = Column(String, nullable=False)                     # 직무 이름
     skill = Column(String, nullable=False)                        # 직무에 필요한 기술명

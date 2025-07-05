@@ -6,7 +6,8 @@ from app.models.user import User
 from app.models.user_skill import UserSkill
 from app.models.user_certificate import UserCertificate
 from app.schemas.user import (
-    UserCreate,
+    UserCreateID, 
+    UserCreateEmail,
     UserResponse,
     ResumeUpdate,
     UserSkillCreate,
@@ -19,38 +20,39 @@ from app.core.security import get_password_hash
 
 router = APIRouter(prefix="/users", tags=["User"])
 
-# 회원가입
-@router.post("/signup", response_model=UserResponse, summary="회원가입", description="""
-회원 정보를 입력받아 회원가입을 수행합니다.
-
-- `signup_type`이 `"id"`인 경우 `username`으로 가입
-- `signup_type`이 `"email"`인 경우 `email`로 가입
-- 이메일 또는 아이디 중복 시 400 에러 반환
-""")
-def signup(user_data: UserCreate, db: Session = Depends(get_db)):
-    if user_data.signup_type == "id":
-        if not user_data.username:
-            raise HTTPException(status_code=400, detail="아이디(username)는 필수입니다.")
-        if db.query(User).filter(User.username == user_data.username).first():
-            raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
-    elif user_data.signup_type == "email":
-        if not user_data.email:
-            raise HTTPException(status_code=400, detail="이메일은 필수입니다.")
-        if db.query(User).filter(User.email == user_data.email).first():
-            raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
-    else:
-        raise HTTPException(status_code=400, detail="signup_type은 'id' 또는 'email'만 가능합니다.")
+@router.post("/signup/id", response_model=UserResponse, summary="ID 기반 회원가입")
+def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
 
     user = User(
-        username=user_data.username if user_data.signup_type == "id" else None,
-        email=user_data.email if user_data.signup_type == "email" else None,
+        email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         nickname=user_data.nickname,
         name=user_data.name,
         phone_number=user_data.phone_number,
         birth_date=user_data.birth_date,
         gender=user_data.gender,
-        signup_type=user_data.signup_type,
+        signup_type="id"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.post("/signup/email", response_model=UserResponse, summary="소셜 기반 회원가입")
+def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
+
+    user = User(
+        email=user_data.email,
+        nickname=user_data.nickname,
+        name=user_data.name,
+        phone_number=user_data.phone_number,
+        birth_date=user_data.birth_date,
+        gender=user_data.gender,
+        signup_type="email"
     )
     db.add(user)
     db.commit()

@@ -8,7 +8,7 @@ class UserPreference(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    job_post_id = Column(Integer, ForeignKey("job_post.id", ondelete="CASCADE"), nullable=False)
+    job_post_id = Column(Integer, ForeignKey("job_posts.id", ondelete="CASCADE"), nullable=False)
 
-    user = relationship("User", back_populates="preferences")
-    job_posting = relationship("Job_post", back_populates="liked_by")
+    user = relationship("User", back_populates="user_preferences")
+    job_posting = relationship("JobPost", back_populates="liked_by")

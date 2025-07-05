@@ -20,7 +20,7 @@ class User(Base):
     major = Column(String, nullable=True)                             # 전공/학과 (optional)
     gpa = Column(Float, nullable=True)                                # 학점 (optional)
     education_status = Column(String, nullable=True)                  # 학력 상태 (재학/졸업/휴학/졸업예정 등)
-    degree = Column(String, nullable=False)                           # 학위
+    degree = Column(String, nullable=False,default="고등학교")                           # 학위
     language_score = Column(JSON, nullable=False, default=dict)       # 어학 점수 (JSON, ex: {"TOEIC": 500})
     desired_job = Column(String, nullable=True)                       # 희망 직무 (optional)
     experience = Column(JSON, nullable=False, default=list)           # 경험 (JSON list of projects)

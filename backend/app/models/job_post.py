@@ -5,7 +5,7 @@ from app.database.PostgreSQL import Base
 
 
 class JobPost(Base):
-    __tablename__ = "job_post"
+    __tablename__ = "job_posts"
 
     id = Column(Integer, primary_key=True, index=True)  # 공고 ID
     title = Column(String(255), nullable=False)  # 공고 제목
@@ -32,3 +32,5 @@ class JobPost(Base):
 
     # 관계 설정 (선택사항)
     job_required_skill = relationship("JobRequiredSkill", backref="job_posts")
+    liked_by = relationship("UserPreference", back_populates="job_posting", cascade="all, delete-orphan")
+
