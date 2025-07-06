@@ -14,7 +14,9 @@ from app.routers import (
     job_required_skill,
     user_preference,
     user_roadmap,
-    job_post
+    job_post,
+    user_certificate,
+    user_skill
 )
 from app.mcp_client import get_mcp_response
 
@@ -53,6 +55,9 @@ app.include_router(job_required_skill.router)
 app.include_router(user_preference.router)
 app.include_router(user_roadmap.router)
 app.include_router(job_post.router)
+app.include_router(user_certificate.router)
+app.include_router(user_skill.router)
+
 # MCP 모의 API
 @app.get("/")
 def hello():

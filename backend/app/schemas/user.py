@@ -1,6 +1,8 @@
 from pydantic import BaseModel, EmailStr, Field
 from datetime import date, datetime
 from typing import Optional, List, Dict
+from app.schemas.user_skill import UserSkillResponse,UserSkillCreate
+from app.schemas.user_certificate import UserCertificateResponse,UserCertificateCreate
 
 # ID 기반 회원가입용
 class UserCreateID(BaseModel):
@@ -45,34 +47,30 @@ class ResumeUpdate(BaseModel):
     desired_job: Optional[str] = None
     experience: Optional[List[dict]] = Field(default_factory=list)
     working_year: Optional[str] = "신입"
+    
+    skills: Optional[List[UserSkillCreate]] = None
+    certificates: Optional[List[UserCertificateCreate]] = None
 
 # 이력서 응답용
-class ResumeResponse(ResumeUpdate):
+class UserResumeResponse(BaseModel):
     id: int
+    email: EmailStr
+    nickname: str
+    name: str
+    phone_number: str
 
-    class Config:
-        orm_mode = True
+    university: Optional[str] = None
+    major: Optional[str] = None
+    gpa: Optional[float] = None
+    education_status: Optional[str] = None
+    degree: Optional[str] = None
+    language_score: Optional[dict] = Field(default_factory=dict)
+    desired_job: Optional[str] = None
+    experience: Optional[List[dict]] = Field(default_factory=list)
+    working_year: Optional[str] = "신입"
 
-# 사용자 보유 기술 입력용
-class UserSkillCreate(BaseModel):
-    skill_id: int
-    proficiency: str
-
-# 사용자 보유 기술 응답용
-class UserSkillResponse(UserSkillCreate):
-    id: int
-
-    class Config:
-        orm_mode = True
-
-# 사용자 자격증 입력용
-class UserCertificateCreate(BaseModel):
-    certificate_id: int
-    acquired_date: date
-
-# 사용자 자격증 응답용
-class UserCertificateResponse(UserCertificateCreate):
-    id: int
+    skills: List[UserSkillResponse] = []
+    certificates: List[UserCertificateResponse] = []
 
     class Config:
         orm_mode = True

@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
@@ -10,10 +9,7 @@ from app.schemas.user import (
     UserCreateEmail,
     UserResponse,
     ResumeUpdate,
-    UserSkillCreate,
-    UserSkillResponse,
-    UserCertificateCreate,
-    UserCertificateResponse
+    UserResumeResponse
 )
 from app.utils.dependencies import get_current_user
 from app.core.security import get_password_hash
@@ -59,7 +55,6 @@ def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
     db.refresh(user)
     return user
 
-
 # 내 정보 조회
 @router.get("/me", response_model=UserResponse, summary="내 정보 조회", description="""
 현재 로그인된 사용자의 정보를 조회합니다.
@@ -76,116 +71,53 @@ def update_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    for field, value in resume_data.dict(exclude_unset=True).items():
+    data = resume_data.dict(exclude_unset=True, exclude={"skills", "certificates"})
+    for field, value in data.items():
         setattr(current_user, field, value)
+
+    # 기술 업데이트
+    if resume_data.skills is not None:
+        # 기존 기술 삭제
+        db.query(UserSkill).filter(UserSkill.user_id == current_user.id).delete()
+        # 새로 등록
+        for skill in resume_data.skills:
+            new_skill = UserSkill(
+                user_id=current_user.id,
+                skill_id=skill.skill_id,
+                proficiency=skill.proficiency
+            )
+            db.add(new_skill)
+
+    # 자격증 업데이트
+    if resume_data.certificates is not None:
+        # 기존 자격증 삭제
+        db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).delete()
+        # 새로 등록
+        for cert in resume_data.certificates:
+            new_cert = UserCertificate(
+                user_id=current_user.id,
+                certificate_id=cert.certificate_id,
+                acquired_date=cert.acquired_date
+            )
+            db.add(new_cert)
+
     db.commit()
     return {"msg": "이력서 정보가 업데이트되었습니다."}
 
-# 사용자 기술 등록
-@router.post("/me/skills", response_model=UserSkillResponse, summary="보유 기술 추가", description="""
-사용자의 이력서에 기술을 추가합니다.
-
-- `skill_id`: 사전에 등록된 기술 ID
-- `proficiency`: 사용자의 숙련도 (예: 1~5)
-- 인증된 사용자만 사용할 수 있습니다.
-""")
-def add_user_skill(
-    skill_data: UserSkillCreate,
+# 내 이력서 상세 조회 (기술 및 자격증 포함)
+@router.get("/me/resume", response_model=UserResumeResponse, summary="내 이력서 상세 조회")
+def get_my_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    user_skill = UserSkill(
-        user_id=current_user.id,
-        skill_id=skill_data.skill_id,
-        proficiency=skill_data.proficiency
-    )
-    db.add(user_skill)
-    db.commit()
-    db.refresh(user_skill)
-    return user_skill
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
-# 사용자 기술 목록 조회
-@router.get("/me/skills", response_model=List[UserSkillResponse], summary="보유 기술 목록", description="""
-로그인한 사용자가 등록한 기술 목록을 조회합니다.
+    skills = db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()
+    certificates = db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).all()
 
-- 인증된 사용자만 접근 가능
-- 등록된 기술이 없으면 빈 리스트를 반환합니다.
-""")
-def get_user_skills(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    return db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()
+    user.user_skills = skills
+    user.user_certificates = certificates
 
-# 사용자 기술 삭제
-@router.delete("/me/skills/{skill_id}", status_code=204, summary="보유 기술 삭제", description="""
-등록된 기술 중 하나를 삭제합니다.
-
-- `skill_id`는 해당 사용자가 등록한 기술의 고유 ID입니다.
-- 본인의 기술만 삭제할 수 있으며, 존재하지 않으면 404 에러를 반환합니다.
-- 인증된 사용자만 사용할 수 있습니다.
-""")
-def delete_user_skill(
-    skill_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    skill = db.query(UserSkill).filter(UserSkill.id == skill_id, UserSkill.user_id == current_user.id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="해당 보유 기술을 찾을 수 없습니다.")
-    db.delete(skill)
-    db.commit()
-    return
-
-# 사용자 자격증 등록
-@router.post("/me/certificates", response_model=UserCertificateResponse, summary="자격증 추가", description="""
-사용자가 본인의 자격증을 추가합니다.
-
-- 자격증은 사전에 관리자에 의해 등록된 항목에서 선택해야 합니다.
-- 사용자 인증이 필요합니다.
-""")
-def add_user_certificate(
-    data: UserCertificateCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    user_cert = UserCertificate(
-        user_id=current_user.id,
-        certificate_id=data.certificate_id,
-        acquired_date=data.acquired_date
-    )
-    db.add(user_cert)
-    db.commit()
-    db.refresh(user_cert)
-    return user_cert
-
-# 사용자 자격증 목록 조회
-@router.get("/me/certificates", response_model=List[UserCertificateResponse], summary="자격증 목록", description="""
-로그인된 사용자가 보유한 자격증 목록을 조회합니다.
-
-- 인증된 사용자만 접근 가능합니다.
-""")
-def get_my_certificates(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    return db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).all()
-
-# 사용자 자격증 삭제
-@router.delete("/me/certificates/{cert_id}", status_code=204, summary="자격증 삭제", description="""
-보유 중인 자격증 중 하나를 삭제합니다.
-
-- 본인 소유의 자격증만 삭제 가능
-- 인증이 필요합니다.
-""")
-def delete_user_certificate(
-    cert_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    cert = db.query(UserCertificate).filter(UserCertificate.id == cert_id, UserCertificate.user_id == current_user.id).first()
-    if not cert:
-        raise HTTPException(status_code=404, detail="자격증 기록을 찾을 수 없습니다.")
-    db.delete(cert)
-    db.commit()
-    return
+    return user

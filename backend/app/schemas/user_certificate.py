@@ -1,16 +1,15 @@
 from pydantic import BaseModel, Field
 from datetime import date
 
-class UserCertificateBase(BaseModel):
-    certificate_id: int = Field(..., description="연결할 자격증 ID")
+class UserCertificateCreate(BaseModel):
+    certificate_name: str = Field(..., description="자격증 이름") 
     acquired_date: date = Field(..., description="자격증 취득일")
 
-class UserCertificateCreate(UserCertificateBase):
-    pass
-
-class UserCertificateResponse(UserCertificateBase):
+class UserCertificateResponse(BaseModel):
     id: int
     user_id: int
+    certificate_id: int
+    acquired_date: date
 
     class Config:
-        from_attributes = True
+        orm_mode = True
