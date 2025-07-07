@@ -11,4 +11,4 @@ class UserPreferenceResponse(UserPreferenceBase):
     user_id: int
 
     class Config:
-        from_attributes = True  # orm_mode (v1) → from_attributes (v2)
+        from_attributes = True

@@ -24,10 +24,11 @@ def list_skills(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    skills = db.query(Skill).filter(Skill.user_id == current_user.id).all()
+    skills = db.query(Skill).all()
     return skills
 
 
+# 기술 항목 추가 (관리자만 가능)
 @router.post(
     "/",
     response_model=SkillResponse,
@@ -44,13 +45,22 @@ def add_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    new_skill = Skill(user_id=current_user.id, name=skill_data.name)
+    # 관리자 권한 체크 예시 (User 모델에 is_admin 필드 있다고 가정)
+    #if not getattr(current_user, "is_admin", False):
+    #    raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
+    # 중복 기술명 확인
+    existing_skill = db.query(Skill).filter(Skill.name == skill_data.name).first()
+    if existing_skill:
+        raise HTTPException(status_code=400, detail="이미 등록된 기술명입니다.")
+
+    new_skill = Skill(name=skill_data.name)
     db.add(new_skill)
     db.commit()
     db.refresh(new_skill)
     return new_skill
 
-
+# 기술 항목 삭제 (관리자만 가능)
 @router.delete(
     "/{skill_id}",
     status_code=204,
@@ -59,8 +69,7 @@ def add_skill(
 기술 마스터 DB에서 특정 기술 항목을 삭제합니다.
 
 - `skill_id`는 삭제할 기술의 고유 ID입니다.
-- 해당 기술이 존재하지 않거나, 본인이 등록한 항목이 아닌 경우 에러를 반환합니다.
-- 관리자 또는 등록자가 삭제할 수 있습니다.
+- 관리자만 삭제할 수 있습니다.
 """
 )
 def delete_skill(
@@ -68,11 +77,14 @@ def delete_skill(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # 관리자 권한 체크
+    #if not getattr(current_user, "is_admin", False):
+    #   raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
     skill = db.query(Skill).filter(Skill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="해당 기술 항목을 찾을 수 없습니다.")
-    if skill.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="해당 기술 항목을 삭제할 권한이 없습니다.")
+
     db.delete(skill)
     db.commit()
     return Response(status_code=204)

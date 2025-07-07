@@ -81,28 +81,38 @@ def update_resume(
         db.query(UserSkill).filter(UserSkill.user_id == current_user.id).delete()
         # 새로 등록
         for skill in resume_data.skills:
+            # skill_name으로 skill 테이블에서 조회
+            skill_obj = db.query(Skill).filter(Skill.skill_name == skill.skill_name).first()
+            if not skill_obj:
+                # 스킬이 없으면 등록 불가 처리 (예외 발생 또는 무시)
+                raise HTTPException(status_code=400, detail=f"등록되지 않은 스킬명입니다: {skill.skill_name}")
+                # 또는 continue로 무시 가능: continue
+
             new_skill = UserSkill(
                 user_id=current_user.id,
-                skill_id=skill.skill_id,
+                skill_id=skill_obj.id,
                 proficiency=skill.proficiency
             )
             db.add(new_skill)
 
-    # 자격증 업데이트
+    # 자격증 업데이트 (기존 코드 유지)
     if resume_data.certificates is not None:
-        # 기존 자격증 삭제
         db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).delete()
-        # 새로 등록
         for cert in resume_data.certificates:
+            cert_obj = db.query(Certificate).filter(Certificate.certificate_name == cert.certificate_name).first()
+            if not cert_obj:
+                raise HTTPException(status_code=400, detail=f"등록되지 않은 자격증명입니다: {cert.certificate_name}")
+
             new_cert = UserCertificate(
                 user_id=current_user.id,
-                certificate_id=cert.certificate_id,
+                certificate_id=cert_obj.id,
                 acquired_date=cert.acquired_date
             )
             db.add(new_cert)
 
     db.commit()
     return {"msg": "이력서 정보가 업데이트되었습니다."}
+
 
 # 내 이력서 상세 조회 (기술 및 자격증 포함)
 @router.get("/me/resume", response_model=UserResumeResponse, summary="내 이력서 상세 조회")

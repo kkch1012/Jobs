@@ -34,7 +34,7 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # 이력서(프로필) 업데이트용
 class ResumeUpdate(BaseModel):
@@ -73,4 +73,4 @@ class UserResumeResponse(BaseModel):
     certificates: List[UserCertificateResponse] = []
 
     class Config:
-        orm_mode = True
+        from_attributes = True

@@ -26,7 +26,7 @@ class JobPost(Document):
         name = "job_posts"
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "title": {"ko": "백엔드 개발자", "en": "Backend Developer"},
                 "company_name": {"ko": "ABC회사"},
