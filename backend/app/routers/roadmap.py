@@ -41,8 +41,8 @@ def create_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="관리자만 로드맵을 생성할 수 있습니다.")
+    # if current_user.role != "admin":
+    #     raise HTTPException(status_code=403, detail="관리자만 로드맵을 생성할 수 있습니다.")
 
     new_roadmap = Roadmap(**roadmap.model_dump())
     db.add(new_roadmap)
@@ -70,8 +70,8 @@ def update_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="관리자만 수정할 수 있습니다.")
+    # if current_user.role != "admin":
+    #     raise HTTPException(status_code=403, detail="관리자만 수정할 수 있습니다.")
 
     roadmap = db.query(Roadmap).filter(Roadmap.id == roadmap_id).first()
     if not roadmap:
@@ -103,8 +103,8 @@ def delete_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="관리자만 삭제할 수 있습니다.")
+    # if current_user.role != "admin":
+    #     raise HTTPException(status_code=403, detail="관리자만 삭제할 수 있습니다.")
 
     roadmap = db.query(Roadmap).filter(Roadmap.id == roadmap_id).first()
     if not roadmap:

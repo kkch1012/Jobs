@@ -1,9 +1,17 @@
-# mcp_client.py
+import os
+import httpx
 
-"""
-MCP API 호출을 모방하는 모의 클라이언트 모듈.
-실제 외부 API를 호출하는 대신, 테스트용으로 예상 응답을 반환하는 함수를 제공합니다.
-"""
+MCP_URL = os.getenv("MCP_URL", "https://postgremcp.server.com/parse")
+MCP_TOKEN = os.getenv("MCP_TOKEN", "<YOUR_TOKEN_HERE>")
+
+async def parse_mcp(message: str) -> dict:
+    headers = {"Authorization": f"Bearer {MCP_TOKEN}"}
+    payload = {"message": message}
+    async with httpx.AsyncClient() as client:
+        response = await client.post(MCP_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        return response.json()
+
 
 def get_mcp_response(message: str) -> dict:
     """

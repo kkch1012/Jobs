@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Optional, List, Dict
 from app.schemas.user_skill import UserSkillResponse,UserSkillCreate
 from app.schemas.user_certificate import UserCertificateResponse,UserCertificateCreate
+from app.schemas.user_experience import UserExperienceResponse, UserExperienceCreate
 
 # ID 기반 회원가입용
 class UserCreateID(BaseModel):
@@ -45,13 +46,12 @@ class ResumeUpdate(BaseModel):
     degree: Optional[str] = None
     language_score: Optional[Dict[str, int]] = Field(default_factory=dict)
     desired_job: Optional[str] = None
-    experience: Optional[List[dict]] = Field(default_factory=list)
     working_year: Optional[str] = "신입"
-    
+
     skills: Optional[List[UserSkillCreate]] = None
     certificates: Optional[List[UserCertificateCreate]] = None
+    experience: Optional[List[UserExperienceCreate]] = None  # 변경
 
-# 이력서 응답용
 class UserResumeResponse(BaseModel):
     id: int
     email: EmailStr
@@ -66,11 +66,11 @@ class UserResumeResponse(BaseModel):
     degree: Optional[str] = None
     language_score: Optional[dict] = Field(default_factory=dict)
     desired_job: Optional[str] = None
-    experience: Optional[List[dict]] = Field(default_factory=list)
     working_year: Optional[str] = "신입"
 
     skills: List[UserSkillResponse] = []
     certificates: List[UserCertificateResponse] = []
+    experience: List[UserExperienceResponse] = []  # 변경
 
     class Config:
         from_attributes = True

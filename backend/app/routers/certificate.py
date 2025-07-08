@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.certificate import Certificate
 from app.schemas.certificate import CertificateCreate, CertificateResponse
-from app.core.security import admin_only
+# from app.core.security import admin_only  # 주석 처리
+from app.core.security import get_current_user  # 추가 import 필요
 from app.models.user import User
 
 router = APIRouter(prefix="/certificates", tags=["certificates"])
@@ -38,8 +39,12 @@ def list_all_certificates(db: Session = Depends(get_db)):
 def create_certificate(
     cert_data: CertificateCreate,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(admin_only)
+    current_user: User = Depends(get_current_user)  # admin_only → get_current_user로 변경
 ):
+    # 관리자 권한 체크 예시 (User 모델에 is_admin 또는 role 필드가 있다고 가정)
+    # if not getattr(current_user, "is_admin", False):
+    #     raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
     new_cert = Certificate(name=cert_data.name, issuer=cert_data.issuer)
     db.add(new_cert)
     db.commit()
@@ -62,8 +67,12 @@ def create_certificate(
 def delete_certificate(
     cert_id: int,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(admin_only)
+    current_user: User = Depends(get_current_user)  # admin_only → get_current_user로 변경
 ):
+    # 관리자 권한 체크 예시
+    # if not getattr(current_user, "is_admin", False):
+    #     raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+
     cert = db.query(Certificate).filter(Certificate.id == cert_id).first()
     if not cert:
         raise HTTPException(status_code=404, detail="자격증을 찾을 수 없습니다.")

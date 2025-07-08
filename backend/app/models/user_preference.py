@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
-
+from app.models.job_post import JobPost
 class UserPreference(Base):
     __tablename__ = "user_preferences"
     __table_args__ = (UniqueConstraint("user_id", "job_post_id", name="uix_user_job"),)

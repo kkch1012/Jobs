@@ -28,7 +28,13 @@ def add_user_certificate(
     db.add(user_cert)
     db.commit()
     db.refresh(user_cert)
-    return user_cert
+    
+    # 응답 스키마에 맞춰 certificate_name 추가해서 반환
+    return UserCertificateResponse(
+        id=user_cert.id,
+        certificate_name=cert_master.name,
+        acquired_date=user_cert.acquired_date
+    )
 
 @router.get("/", response_model=List[UserCertificateResponse], summary="자격증 목록", description="""
 로그인된 사용자가 보유한 자격증 목록을 조회합니다.
@@ -39,7 +45,20 @@ def get_my_certificates(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).all()
+    user_certs = (
+        db.query(UserCertificate, Certificate.name.label("certificate_name"))
+          .join(Certificate, UserCertificate.certificate_id == Certificate.id)
+          .filter(UserCertificate.user_id == current_user.id)
+          .all()
+    )
+    return [
+        UserCertificateResponse(
+            id=user_cert.id,
+            certificate_name=certificate_name,
+            acquired_date=user_cert.acquired_date
+        )
+        for user_cert, certificate_name in user_certs
+    ]
 
 @router.delete("/{cert_id}", status_code=204, summary="자격증 삭제", description="""
 보유 중인 자격증 중 하나를 삭제합니다.

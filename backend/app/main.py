@@ -1,10 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.models.mongo.job_post import JobPost
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo
+from app.mcp_client import parse_mcp
 from app.routers import (
     auth,
     user,
@@ -16,7 +16,8 @@ from app.routers import (
     user_roadmap,
     job_post,
     user_certificate,
-    user_skill
+    user_skill,
+    preprocess
 )
 from app.mcp_client import get_mcp_response
 
@@ -57,19 +58,22 @@ app.include_router(user_roadmap.router)
 app.include_router(job_post.router)
 app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
+app.include_router(preprocess.router)
 
 # MCP 모의 API
 @app.get("/")
 def hello():
     return {"message": "MCP mock 서버가 실행 중입니다."}
 
+
 @app.get("/mcp")
 async def mcp_endpoint(message: str):
-    response_data = get_mcp_response(message)
-    return response_data
-@app.post("/test-mongo")
-async def test_insert():
-    doc = JobPost(title="FastAPI", company="Test Inc.", skills=["Python", "Mongo"])
-    await doc.insert()
-    return {"inserted_id": str(doc.id)}
-
+    try:
+        response_data = await parse_mcp(message)  # 실제 MCP API 호출
+        return response_data
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": "MCP 요청 실패",
+            "detail": str(e)
+        }

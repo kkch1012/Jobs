@@ -2,7 +2,8 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
-
+from pgvector.sqlalchemy import Vector
+from app.models.job_required_skill import JobRequiredSkill
 
 class JobPost(Base):
     __tablename__ = "job_posts"
@@ -13,7 +14,7 @@ class JobPost(Base):
     size = Column(String(255), nullable=False)  # 기업 규모
     address = Column(String(255), nullable=False)  # 주소
 
-    job_required_skill_id = Column(Integer, ForeignKey("job_required_skill.id", ondelete="SET NULL"), nullable=True)  # 직무 ID 참조
+    job_required_skill_id = Column(Integer, ForeignKey("job_required_skills.id", ondelete="SET NULL"), nullable=True)  # 직무 ID 참조
 
     employment_type = Column(String(255), nullable=True)  # 고용형태
     applicant_type = Column(Text, nullable=False)  # 지원 자격
@@ -24,9 +25,12 @@ class JobPost(Base):
     preferences = Column(Text, nullable=True)  # 우대 사항
     tech_stack = Column(Text, nullable=True)  # 기술 스택 요약
 
-    required_skills = Column(Text, nullable=True)  # 요구 기술 스택 (콤마로 구분된 문자열 등)
-    preferred_skills = Column(Text, nullable=True)  # 선호 기술 스택
-    essential_tech_stack = Column(Text, nullable=True)  # 필수 기술 스택
+    # pgvector 타입 컬럼 (벡터 길이 지정 필요, 예: 300)
+    required_skills = Column(Vector(300), nullable=True)  
+    preferred_skills = Column(Vector(300), nullable=True)  
+    essential_tech_stack = Column(Vector(300), nullable=True) 
+
+    full_embedding = Column(Vector(300), nullable=True)  # 전체 임베딩 추가
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 생성 시각
 

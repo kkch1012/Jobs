@@ -1,3 +1,9 @@
 ﻿fastapi
 uvicorn
 python-dotenv
+httpx
+SQLAlchemy
+psycopg2-binary
+databases
+pydantic
+pgvector

@@ -5,8 +5,29 @@ from app.models.user_preference import UserPreference
 from app.schemas.user_preference import UserPreferenceCreate, UserPreferenceResponse
 from app.utils.dependencies import get_current_user
 from app.models.user import User
+from typing import List
+
 
 router = APIRouter(prefix="/preferences", tags=["User Preferences"])
+
+@router.get(
+    "/",
+    response_model=List[UserPreferenceResponse],
+    summary="찜한 채용공고 목록 조회",
+    description="""
+사용자가 찜한 모든 채용공고 목록을 조회합니다.
+
+- 로그인한 사용자의 찜한 공고 리스트를 반환합니다.
+- 각 찜한 공고에 연결된 공고 상세 정보도 함께 포함됩니다.
+"""
+)
+def get_preferences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    prefs = db.query(UserPreference).filter(UserPreference.user_id == current_user.id).all()
+    return prefs
+
 
 @router.post(
     "/",

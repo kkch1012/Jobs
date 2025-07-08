@@ -13,6 +13,9 @@ from app.schemas.user import (
 )
 from app.utils.dependencies import get_current_user
 from app.core.security import get_password_hash
+from app.models.skill import Skill
+from app.models.certificate import Certificate
+from app.models.user_experience import UserExperience 
 
 router = APIRouter(prefix="/users", tags=["User"])
 
@@ -65,56 +68,54 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
     return current_user
 
 # 이력서(프로필) 업데이트
+
 @router.put("/me/resume", summary="이력서 정보 입력/수정")
 def update_resume(
     resume_data: ResumeUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    data = resume_data.dict(exclude_unset=True, exclude={"skills", "certificates"})
+    # User 기본 필드 업데이트 (skills, certificates, experience 제외)
+    data = resume_data.dict(exclude_unset=True, exclude={"skills", "certificates", "experience"})
     for field, value in data.items():
         setattr(current_user, field, value)
 
     # 기술 업데이트
     if resume_data.skills is not None:
-        # 기존 기술 삭제
         db.query(UserSkill).filter(UserSkill.user_id == current_user.id).delete()
-        # 새로 등록
         for skill in resume_data.skills:
-            # skill_name으로 skill 테이블에서 조회
-            skill_obj = db.query(Skill).filter(Skill.skill_name == skill.skill_name).first()
+            skill_obj = db.query(Skill).filter(Skill.name == skill.skill_name).first()
             if not skill_obj:
-                # 스킬이 없으면 등록 불가 처리 (예외 발생 또는 무시)
                 raise HTTPException(status_code=400, detail=f"등록되지 않은 스킬명입니다: {skill.skill_name}")
-                # 또는 continue로 무시 가능: continue
-
-            new_skill = UserSkill(
-                user_id=current_user.id,
-                skill_id=skill_obj.id,
-                proficiency=skill.proficiency
-            )
+            new_skill = UserSkill(user_id=current_user.id, skill_id=skill_obj.id, proficiency=skill.proficiency)
             db.add(new_skill)
 
-    # 자격증 업데이트 (기존 코드 유지)
+    # 자격증 업데이트
     if resume_data.certificates is not None:
         db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).delete()
         for cert in resume_data.certificates:
-            cert_obj = db.query(Certificate).filter(Certificate.certificate_name == cert.certificate_name).first()
+            cert_obj = db.query(Certificate).filter(Certificate.name == cert.certificate_name).first()
             if not cert_obj:
                 raise HTTPException(status_code=400, detail=f"등록되지 않은 자격증명입니다: {cert.certificate_name}")
-
-            new_cert = UserCertificate(
-                user_id=current_user.id,
-                certificate_id=cert_obj.id,
-                acquired_date=cert.acquired_date
-            )
+            new_cert = UserCertificate(user_id=current_user.id, certificate_id=cert_obj.id, acquired_date=cert.acquired_date)
             db.add(new_cert)
+
+    # 경험 업데이트
+    if resume_data.experience is not None:
+        db.query(UserExperience).filter(UserExperience.user_id == current_user.id).delete()
+        for exp in resume_data.experience:
+            new_exp = UserExperience(
+                user_id=current_user.id,
+                type=exp.type,
+                name=exp.name,
+                period=exp.period,
+                description=exp.description
+            )
+            db.add(new_exp)
 
     db.commit()
     return {"msg": "이력서 정보가 업데이트되었습니다."}
 
-
-# 내 이력서 상세 조회 (기술 및 자격증 포함)
 @router.get("/me/resume", response_model=UserResumeResponse, summary="내 이력서 상세 조회")
 def get_my_resume(
     db: Session = Depends(get_db),
@@ -126,8 +127,52 @@ def get_my_resume(
 
     skills = db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()
     certificates = db.query(UserCertificate).filter(UserCertificate.user_id == current_user.id).all()
+    experiences = db.query(UserExperience).filter(UserExperience.user_id == current_user.id).all()
 
-    user.user_skills = skills
-    user.user_certificates = certificates
+    skill_list = []
+    for us in skills:
+        skill_obj = db.query(Skill).filter(Skill.id == us.skill_id).first()
+        skill_list.append({
+            "skill_name": skill_obj.name if skill_obj else "", 
+            "proficiency": us.proficiency,
+            "skill_id": us.skill_id
+        })
 
-    return user
+    certificate_list = []
+    for uc in certificates:
+        cert_obj = db.query(Certificate).filter(Certificate.id == uc.certificate_id).first()
+        certificate_list.append({
+            "certificate_name": cert_obj.name if cert_obj else "", 
+            "acquired_date": uc.acquired_date,
+            "id": uc.id
+        })
+
+    experience_list = []
+    for ue in experiences:
+        experience_list.append({
+            "type": ue.type,
+            "name": ue.name,
+            "period": ue.period,
+            "description": ue.description,
+            "id": ue.id
+        })
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "nickname": user.nickname,
+        "name": user.name,
+        "phone_number": user.phone_number,
+        "university": user.university,
+        "major": user.major,
+        "gpa": user.gpa,
+        "education_status": user.education_status,
+        "degree": user.degree,
+        "language_score": user.language_score,
+        "desired_job": user.desired_job,
+        "experience": experience_list,
+        "working_year": user.working_year,
+        "skills": skill_list,
+        "certificates": certificate_list
+    }
+
