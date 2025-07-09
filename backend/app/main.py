@@ -17,7 +17,8 @@ from app.routers import (
     job_post,
     user_certificate,
     user_skill,
-    preprocess
+    preprocess,
+    mcp
 )
 
 # 앱 시작 시 데이터베이스 초기화 (PostgreSQL 테이블 생성 및 MongoDB 연결)
@@ -58,24 +59,4 @@ app.include_router(job_post.router)
 app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
 app.include_router(preprocess.router)
-
-# MCP 모의 API
-@app.get("/")
-def hello():
-    return {"message": "MCP mock 서버가 실행 중입니다."}
-
-@app.get("/mcp", summary="mcp 엔드포인트", description="프론트엔드에서 전달된 자연어 명령을 처리하는 MCP 엔드포인트")
-async def mcp_endpoint(message: str, user_id: int):
-    """
-    Frontend에서 전달된 자연어 명령을 처리하는 MCP 엔드포인트.
-    예: /mcp?message=파이썬+로드맵+추천해줘&user_id=1
-    """
-    try:
-        response_data = await parse_mcp(message, user_id)
-        return response_data
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": "MCP 요청 처리 실패",
-            "detail": str(e)
-        }
+app.include_router(mcp.router)
