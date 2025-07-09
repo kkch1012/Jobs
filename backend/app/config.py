@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     )
 
     # MongoDB 설정 (크롤링 원본 데이터 저장용)
-    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://admin:yourpassword@localhost:27017/?authSource=admin")
     MONGO_DB_NAME: str = os.getenv("MONGO_DB_NAME", "jobs_db")
 
     # 보안 설정

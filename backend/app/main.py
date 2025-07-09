@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
@@ -19,7 +19,6 @@ from app.routers import (
     user_skill,
     preprocess
 )
-from app.mcp_client import get_mcp_response
 
 # 앱 시작 시 데이터베이스 초기화 (PostgreSQL 테이블 생성 및 MongoDB 연결)
 @asynccontextmanager
@@ -65,15 +64,18 @@ app.include_router(preprocess.router)
 def hello():
     return {"message": "MCP mock 서버가 실행 중입니다."}
 
-
-@app.get("/mcp")
-async def mcp_endpoint(message: str):
+@app.get("/mcp", summary="mcp 엔드포인트", description="프론트엔드에서 전달된 자연어 명령을 처리하는 MCP 엔드포인트")
+async def mcp_endpoint(message: str, user_id: int):
+    """
+    Frontend에서 전달된 자연어 명령을 처리하는 MCP 엔드포인트.
+    예: /mcp?message=파이썬+로드맵+추천해줘&user_id=1
+    """
     try:
-        response_data = await parse_mcp(message)  # 실제 MCP API 호출
+        response_data = await parse_mcp(message, user_id)
         return response_data
     except Exception as e:
         return {
             "status": "error",
-            "message": "MCP 요청 실패",
+            "message": "MCP 요청 처리 실패",
             "detail": str(e)
         }

@@ -245,4 +245,29 @@ initial_job_posts = [
         "essential_tech_stack": None,
         "full_embedding": None,
     },
+    
+]
+
+initial_job_required_skills = [
+    {"job_name": "백엔드 개발자", "skill": "Python", "skill_type": "required", "priority": 1},
+    {"job_name": "백엔드 개발자", "skill": "FastAPI", "skill_type": "required", "priority": 1},
+    {"job_name": "백엔드 개발자", "skill": "Docker", "skill_type": "preferred", "priority": 2},
+    {"job_name": "프론트엔드 개발자", "skill": "React", "skill_type": "required", "priority": 1},
+    {"job_name": "프론트엔드 개발자", "skill": "JavaScript", "skill_type": "required", "priority": 1},
+    {"job_name": "프론트엔드 개발자", "skill": "CSS", "skill_type": "preferred", "priority": 2},
+    {"job_name": "DevOps 엔지니어", "skill": "AWS", "skill_type": "required", "priority": 1},
+    {"job_name": "DevOps 엔지니어", "skill": "Kubernetes", "skill_type": "preferred", "priority": 2},
+    {"job_name": "DevOps 엔지니어", "skill": "Terraform", "skill_type": "preferred", "priority": 2},
+    {"job_name": "데이터 사이언티스트", "skill": "TensorFlow", "skill_type": "required", "priority": 1},
+    {"job_name": "데이터 사이언티스트", "skill": "PyTorch", "skill_type": "preferred", "priority": 2},
+    {"job_name": "데이터 엔지니어", "skill": "Apache Kafka", "skill_type": "required", "priority": 1},
+    {"job_name": "데이터 엔지니어", "skill": "Spark", "skill_type": "required", "priority": 1},
+    {"job_name": "모바일 앱 개발자(iOS)", "skill": "Swift", "skill_type": "required", "priority": 1},
+    {"job_name": "모바일 앱 개발자(Android)", "skill": "Kotlin", "skill_type": "required", "priority": 1},
+    {"job_name": "보안 엔지니어", "skill": "Network Security", "skill_type": "required", "priority": 1},
+    {"job_name": "보안 엔지니어", "skill": "Penetration Testing", "skill_type": "preferred", "priority": 2},
+    {"job_name": "게임 개발자", "skill": "Unity", "skill_type": "required", "priority": 1},
+    {"job_name": "게임 개발자", "skill": "Unreal Engine", "skill_type": "preferred", "priority": 2},
+    {"job_name": "QA 엔지니어", "skill": "Selenium", "skill_type": "required", "priority": 1},
+    {"job_name": "QA 엔지니어", "skill": "JUnit", "skill_type": "preferred", "priority": 2},
 ]

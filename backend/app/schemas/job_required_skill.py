@@ -16,3 +16,9 @@ class JobRequiredSkillResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class JobNameResponse(BaseModel):
+    name: str
+
+    class Config:
+        from_attributes = True

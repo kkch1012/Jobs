@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import List
+
 # 로드맵 생성 요청 모델
 class RoadmapBase(BaseModel):
     name: str = Field(..., description="로드맵 이름 (예: AI 부트캠프)")
