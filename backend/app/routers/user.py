@@ -19,7 +19,10 @@ from app.models.user_experience import UserExperience
 
 router = APIRouter(prefix="/users", tags=["User"])
 
-@router.post("/signup/id", response_model=UserResponse, summary="ID 기반 회원가입")
+@router.post("/signup/id"
+             ,response_model=UserResponse, 
+             operation_id="signup_by_id",
+             summary="ID 기반 회원가입")
 def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
@@ -39,7 +42,10 @@ def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
     db.refresh(user)
     return user
 
-@router.post("/signup/email", response_model=UserResponse, summary="소셜 기반 회원가입")
+@router.post("/signup/email", 
+             response_model=UserResponse,
+             operation_id="signup_by_email", 
+             summary="소셜 기반 회원가입")
 def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
@@ -59,7 +65,9 @@ def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
     return user
 
 # 내 정보 조회
-@router.get("/me", response_model=UserResponse, summary="내 정보 조회", description="""
+@router.get("/me", response_model=UserResponse, 
+            operation_id="get_my_profile",
+            summary="내 정보 조회", description="""
 현재 로그인된 사용자의 정보를 조회합니다.
 
 - 인증이 필요합니다 (Bearer Token).
@@ -69,7 +77,9 @@ def get_my_profile(current_user: User = Depends(get_current_user)):
 
 # 이력서(프로필) 업데이트
 
-@router.put("/me/resume", summary="이력서 정보 입력/수정")
+@router.put("/me/resume", 
+            operation_id="update_resume",
+            summary="이력서 정보 입력/수정")
 def update_resume(
     resume_data: ResumeUpdate,
     db: Session = Depends(get_db),
@@ -116,7 +126,9 @@ def update_resume(
     db.commit()
     return {"msg": "이력서 정보가 업데이트되었습니다."}
 
-@router.get("/me/resume", response_model=UserResumeResponse, summary="내 이력서 상세 조회")
+@router.get("/me/resume", 
+            operation_id="get_my_resume",
+            response_model=UserResumeResponse, summary="내 이력서 상세 조회")
 def get_my_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

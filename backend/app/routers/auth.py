@@ -20,6 +20,7 @@ class TokenResponse(BaseModel):
 @router.post(
     "/token",
     summary="아이디 로그인",
+    operation_id="login_by_id",
     description="username과 password를 받아 로그인합니다.",
     response_model=TokenResponse,
 )
@@ -40,6 +41,7 @@ class SocialLoginRequest(BaseModel):
 @router.post(
     "/login/social",
     summary="소셜 로그인",
+    operation_id="social_login",
     description="소셜 로그인 사용자가 이메일로 로그인합니다. (비밀번호 없이 이메일만 필요)",
     response_model=TokenResponse,
 )

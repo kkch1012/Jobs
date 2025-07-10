@@ -13,6 +13,7 @@ router = APIRouter(prefix="/certificates", tags=["certificates"])
 @router.get(
     "/",
     response_model=list[CertificateResponse],
+    operation_id="list_all_certificates",
     summary="전체 자격증 목록 조회",
     description="""
 모든 사용자가 선택할 수 있는 자격증 목록을 조회합니다.
@@ -28,6 +29,7 @@ def list_all_certificates(db: Session = Depends(get_db)):
 @router.post(
     "/",
     response_model=CertificateResponse,
+    operation_id="create_certificate",
     summary="자격증 등록 (관리자 전용)",
     description="""
 기준 자격증을 등록합니다. (관리자 전용)
@@ -55,6 +57,7 @@ def create_certificate(
 @router.delete(
     "/{cert_id}",
     status_code=204,
+    operation_id="delete_certificate",
     summary="자격증 삭제 (관리자 전용)",
     description="""
 기준 자격증을 삭제합니다. (관리자 전용)

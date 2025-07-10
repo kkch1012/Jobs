@@ -1,13 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-# from fastmcp import MCPServer
+from fastapi_mcp import FastApiMCP
 from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo
 from dotenv import load_dotenv
-from app.mcp_client import parse_mcp # FASTMCP되면 삭제
-#from app.mcp_prompt import custom_prompt
 from app.routers import (
     auth,
     user,
@@ -21,8 +19,7 @@ from app.routers import (
     user_certificate,
     user_skill,
     preprocess,
-    visualization,
-    mcp # FASTMCP되면 삭제
+    visualization
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -41,6 +38,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Recruitment Platform API",
     lifespan=lifespan
+)
+mcp = FastApiMCP(
+    app, 
+    name="RecruitmentAssistant", 
+    description="구직 플랫폼 기능을 LLM 도구로 노출합니다."
 )
 
 # CORS 설정 (임시 전체 허용)
@@ -66,8 +68,5 @@ app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
 app.include_router(preprocess.router)
 app.include_router(visualization.router)
-app.include_router(mcp.router) # 실제 쓸때는 삭제 테스트 코드
 
-
-# MCPServer를 /mcp에 mount
-#app.mount("/mcp", MCPServer(app, system_prompt=custom_prompt))
+mcp.mount()

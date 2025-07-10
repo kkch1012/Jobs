@@ -13,6 +13,7 @@ router = APIRouter(prefix="/preferences", tags=["User Preferences"])
 @router.get(
     "/",
     response_model=List[UserPreferenceResponse],
+    operation_id="get_preferences",
     summary="찜한 채용공고 목록 조회",
     description="""
 사용자가 찜한 모든 채용공고 목록을 조회합니다.
@@ -32,6 +33,7 @@ def get_preferences(
 @router.post(
     "/",
     response_model=UserPreferenceResponse,
+    operation_id="add_preference",
     summary="채용공고 찜하기",
     description="""
 사용자가 특정 채용공고를 찜(즐겨찾기)합니다.
@@ -67,6 +69,7 @@ def add_preference(
     "/{job_post_id}",
     status_code=204,
     summary="찜한 채용공고 삭제",
+    operation_id="remove_preference",
     description="""
 사용자가 찜한 채용공고를 삭제합니다.
 

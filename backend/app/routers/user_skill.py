@@ -10,7 +10,11 @@ from app.models.skill import Skill
 
 router = APIRouter(prefix="/users/me/skills", tags=["UserSkill"])
 
-@router.post("/", response_model=UserSkillResponse, summary="보유 기술 추가", description="""
+@router.post("/", 
+             response_model=UserSkillResponse, 
+             summary="보유 기술 추가", 
+             operation_id="add_user_skill_by_name",
+             description="""
 사용자의 이력서에 기술을 추가합니다.
 
 - `skill_name`: 스킬 이름
@@ -51,7 +55,10 @@ def add_user_skill_by_name(
         proficiency=user_skill.proficiency
     )
 
-@router.get("/", response_model=List[UserSkillResponse], summary="보유 기술 목록", description="""
+@router.get("/", 
+            response_model=List[UserSkillResponse], 
+            operation_id="get_user_skills",
+            summary="보유 기술 목록", description="""
 로그인한 사용자가 등록한 기술 목록을 조회합니다.
 
 - 인증된 사용자만 접근 가능
@@ -80,7 +87,10 @@ def get_user_skills(
 ]
 
 
-@router.delete("/{skill_id}", status_code=204, summary="보유 기술 삭제", description="""
+@router.delete("/{skill_id}",
+               status_code=204, 
+               operation_id="delete_user_skill",
+               summary="보유 기술 삭제", description="""
 등록된 기술 중 하나를 삭제합니다.
 
 - `skill_id`는 해당 사용자가 등록한 기술의 고유 ID입니다.

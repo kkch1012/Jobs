@@ -12,6 +12,7 @@ router = APIRouter(prefix="/skills", tags=["Skills"])
 @router.get(
     "/",
     response_model=list[SkillResponse],
+    operation_id="list_skills",
     summary="전체 기술 목록 조회",
     description="""
 기술 DB에 등록된 전체 기술 목록을 조회합니다.
@@ -32,6 +33,7 @@ def list_skills(
 @router.post(
     "/",
     response_model=SkillResponse,
+    operation_id="add_skill",
     summary="기술 항목 추가(관리자)",
     description="""
 기술 마스터 DB에 새로운 기술 항목을 추가합니다.
@@ -64,6 +66,7 @@ def add_skill(
 @router.delete(
     "/{skill_id}",
     status_code=204,
+    operation_id="delete_skill",
     summary="기술 항목 삭제(관리자)",
     description="""
 기술 마스터 DB에서 특정 기술 항목을 삭제합니다.

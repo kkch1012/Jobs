@@ -10,7 +10,10 @@ from app.models.certificate import Certificate
 
 router = APIRouter(prefix="/users/me/certificates", tags=["UserCertificate"])
 
-@router.post("/", response_model=UserCertificateResponse, summary="자격증 추가")
+@router.post("/",
+              response_model=UserCertificateResponse, 
+              operation_id="add_user_certificate",
+              summary="자격증 추가")
 def add_user_certificate(
     data: UserCertificateCreate,
     db: Session = Depends(get_db),
@@ -36,7 +39,10 @@ def add_user_certificate(
         acquired_date=user_cert.acquired_date
     )
 
-@router.get("/", response_model=List[UserCertificateResponse], summary="자격증 목록", description="""
+@router.get("/", 
+            response_model=List[UserCertificateResponse], 
+            operation_id="get_my_certificates",
+            summary="자격증 목록", description="""
 로그인된 사용자가 보유한 자격증 목록을 조회합니다.
 
 - 인증된 사용자만 접근 가능합니다.
@@ -60,7 +66,10 @@ def get_my_certificates(
         for user_cert, certificate_name in user_certs
     ]
 
-@router.delete("/{cert_id}", status_code=204, summary="자격증 삭제", description="""
+@router.delete("/{cert_id}", 
+               status_code=204, 
+               operation_id="delete_user_certificate",
+               summary="자격증 삭제", description="""
 보유 중인 자격증 중 하나를 삭제합니다.
 
 - 본인 소유의 자격증만 삭제 가능

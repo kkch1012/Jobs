@@ -11,6 +11,7 @@ router = APIRouter(prefix="/job_posts", tags=["job_posts"])
 @router.post(
     "/",
     response_model=JobPostResponse,
+    operation_id="create_job_post",
     summary="공고 등록",
     description="""
 관리자 또는 크롤링 도구가 새로운 채용공고를 등록할 때 사용합니다.
@@ -31,6 +32,7 @@ def create_job_post(job_post: JobPostCreate, db: Session = Depends(get_db)):
 @router.get(
     "/",
     response_model=List[JobPostResponse],
+    operation_id="read_job_posts",
     summary="전체 채용공고 조회",
     description="""
 모든 채용공고 데이터를 리스트로 조회합니다.
@@ -46,6 +48,7 @@ def read_job_posts(db: Session = Depends(get_db)):
 @router.get(
     "/{job_post_id}",
     response_model=JobPostResponse,
+    operation_id="get_job_post",
     summary="단일 채용공고 상세 조회",
     description="""
 특정 채용공고의 상세 정보를 조회합니다.

@@ -13,6 +13,7 @@ router = APIRouter(prefix="/user_roadmaps", tags=["UserRoadmap"])
 @router.post(
     "/",
     response_model=UserRoadmapResponse,
+    operation_id="create_user_roadmap",
     summary="로드맵 찜하기",
     description="""
 현재 로그인한 사용자가 특정 로드맵을 찜(저장)합니다.
@@ -45,6 +46,7 @@ def create_user_roadmap(
 @router.get(
     "/me",
     response_model=List[UserRoadmapResponse],
+    operation_id="get_my_roadmaps",
     summary="내 찜한 로드맵 목록",
     description="""
 로그인한 사용자가 찜한 로드맵 목록을 조회합니다.
@@ -64,6 +66,7 @@ def get_my_roadmaps(
     "/{roadmap_id}",
     status_code=204,
     summary="찜한 로드맵 삭제",
+    operation_id="delete_user_roadmap",
     description="""
 찜한 로드맵을 삭제합니다.
 

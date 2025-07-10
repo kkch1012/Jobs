@@ -13,6 +13,7 @@ router = APIRouter(prefix="/roadmaps", tags=["Roadmaps"])
     "/",
     response_model=list[RoadmapResponse],
     summary="전체 로드맵 조회",
+    operation_id="get_all_roadmaps",
     description="""
 모든 사용자가 등록된 전체 로드맵 목록을 조회할 수 있습니다.
 
@@ -28,6 +29,7 @@ def get_all_roadmaps(db: Session = Depends(get_db)):
 @router.post(
     "/",
     response_model=RoadmapResponse,
+    operation_id="create_roadmap",
     summary="로드맵 생성 (관리자)",
     description="""
 새로운 로드맵을 등록합니다.
@@ -55,6 +57,7 @@ def create_roadmap(
 @router.put(
     "/{roadmap_id}",
     response_model=RoadmapResponse,
+    operation_id="update_roadmap",
     summary="로드맵 수정 (관리자)",
     description="""
 기존 로드맵의 내용을 수정합니다.
@@ -90,6 +93,7 @@ def update_roadmap(
     "/{roadmap_id}",
     status_code=204,
     summary="로드맵 삭제 (관리자)",
+    operation_id="delete_roadmap",
     description="""
 로드맵을 삭제합니다.
 
