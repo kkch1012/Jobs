@@ -1,10 +1,6 @@
 import os
 import httpx
 
-# 환경변수에서 MCP 외부 API 주소와 토큰을 불러올 수 있도록 함 (추후 확장용)
-MCP_URL = os.getenv("MCP_URL", "https://postgremcp.server.com/parse")
-MCP_TOKEN = os.getenv("MCP_TOKEN", "<YOUR_TOKEN_HERE>")
-
 
 async def parse_mcp(message: str, user_id: int) -> dict:
     """

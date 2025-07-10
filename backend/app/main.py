@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+# from fastmcp import MCPServer
 from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo
-from app.mcp_client import parse_mcp
+from dotenv import load_dotenv
+from app.mcp_client import parse_mcp # FASTMCP되면 삭제
+#from app.mcp_prompt import custom_prompt
 from app.routers import (
     auth,
     user,
@@ -18,8 +21,10 @@ from app.routers import (
     user_certificate,
     user_skill,
     preprocess,
-    mcp
+    mcp # FASTMCP되면 삭제
 )
+
+load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
 
 # 앱 시작 시 데이터베이스 초기화 (PostgreSQL 테이블 생성 및 MongoDB 연결)
 @asynccontextmanager
@@ -59,4 +64,8 @@ app.include_router(job_post.router)
 app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
 app.include_router(preprocess.router)
-app.include_router(mcp.router)
+app.include_router(mcp.router) # 실제 쓸때는 삭제 테스트 코드
+
+
+# MCPServer를 /mcp에 mount
+ #app.mount("/mcp", MCPServer(app, system_prompt=custom_prompt))
