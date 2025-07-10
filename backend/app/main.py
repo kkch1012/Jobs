@@ -21,6 +21,7 @@ from app.routers import (
     user_certificate,
     user_skill,
     preprocess,
+    visualization,
     mcp # FASTMCP되면 삭제
 )
 
@@ -64,8 +65,9 @@ app.include_router(job_post.router)
 app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
 app.include_router(preprocess.router)
+app.include_router(visualization.router)
 app.include_router(mcp.router) # 실제 쓸때는 삭제 테스트 코드
 
 
 # MCPServer를 /mcp에 mount
- #app.mount("/mcp", MCPServer(app, system_prompt=custom_prompt))
+#app.mount("/mcp", MCPServer(app, system_prompt=custom_prompt))
