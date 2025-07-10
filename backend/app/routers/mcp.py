@@ -1,5 +1,3 @@
-# app/routers/mcp.py
-
 from fastapi import APIRouter, Depends
 from app.core.security import get_current_user  # JWT 인증 사용할 경우
 from app.mcp_client import parse_mcp
