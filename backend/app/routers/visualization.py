@@ -16,7 +16,7 @@ class WeeklySkillStat(BaseModel):
     count: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 @router.get(
     "/weekly_skill_frequency",
@@ -69,7 +69,7 @@ def weekly_skill_frequency(
         func.date_part('week', JobPost.posting_date).label('week'),
         getattr(JobPost, field)
     ).filter(
-        JobPost.job_role_id == job_role_id
+        JobPost.job_required_skill_id == job_role_id
     ).all()
 
     # 3. 주별로 기술 키워드 카운트

@@ -26,11 +26,11 @@ class JobPost(Base):
     tech_stack = Column(Text, nullable=True)  # 기술 스택 요약
 
     # pgvector 타입 컬럼 (벡터 길이 지정 필요, 예: 300)
-    required_skills = Column(Vector(300), nullable=True)  
-    preferred_skills = Column(Vector(300), nullable=True)  
-    essential_tech_stack = Column(Vector(300), nullable=True) 
+    required_skills = Column(Vector(1000), nullable=True)  
+    preferred_skills = Column(Vector(1000), nullable=True)  
+    essential_tech_stack = Column(Vector(1000), nullable=True) 
 
-    full_embedding = Column(Vector(300), nullable=True)  # 전체 임베딩 추가
+    full_embedding = Column(Vector(2000), nullable=True)  # 전체 임베딩 추가
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 생성 시각
 

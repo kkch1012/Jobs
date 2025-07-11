@@ -12,7 +12,6 @@ from app.data.initial_data import (
     initial_certificates,
     initial_roadmaps,
     initial_job_posts,                         # 추가
-    initial_job_required_skills,
 )
 
 def insert_skills(db: Session):
@@ -56,24 +55,6 @@ def insert_job_posts(db: Session):
     db.commit()
     print("초기 채용공고 목록 삽입 완료")
 
-def insert_job_required_skills(db: Session):
-    for item in initial_job_required_skills:
-        exists = db.query(JobRequiredSkill).filter(
-            JobRequiredSkill.job_name == item["job_name"],
-            JobRequiredSkill.skill == item["skill"],
-            JobRequiredSkill.skill_type == item["skill_type"]
-        ).first()
-
-        if not exists:
-            db.add(JobRequiredSkill(
-                job_name=item["job_name"],
-                skill=item["skill"],
-                skill_type=item["skill_type"],
-                priority=item["priority"]
-            ))
-    db.commit()
-    print("초기 직무 기술 요구사항 삽입 완료")
-
 def main():
     db = SessionLocal()
     try:
@@ -81,7 +62,6 @@ def main():
         insert_certificates(db)
         insert_roadmaps(db)
         insert_job_posts(db)
-        insert_job_required_skills(db)
     finally:
         db.close()
 
