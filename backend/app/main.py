@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_mcp import FastApiMCP
 from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
@@ -19,7 +18,8 @@ from app.routers import (
     user_certificate,
     user_skill,
     preprocess,
-    visualization
+    visualization,
+    chat
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -38,11 +38,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Recruitment Platform API",
     lifespan=lifespan
-)
-mcp = FastApiMCP(
-    app, 
-    name="RecruitmentAssistant", 
-    description="구직 플랫폼 기능을 LLM 도구로 노출합니다."
 )
 
 # CORS 설정 (임시 전체 허용)
@@ -68,5 +63,4 @@ app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
 app.include_router(preprocess.router)
 app.include_router(visualization.router)
-
-mcp.mount()
+app.include_router(chat.router)
