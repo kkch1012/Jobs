@@ -1,25 +1,24 @@
 from pydantic import BaseModel
+from typing import Optional, List
 from datetime import datetime
-from typing import Optional
-
 
 class JobPostBase(BaseModel):
     title: str
     company_name: str
-    size: str
-    address: str
-    job_required_skill_id: Optional[int] 
+    size: Optional[str] = None
+    address: Optional[str] = None
+    job_required_skill_id: Optional[int] = None
     employment_type: Optional[str] = None
     applicant_type: str
     posting_date: datetime
-    deadline: datetime
+    deadline: Optional[datetime] = None
     main_tasks: Optional[str] = None
     qualifications: Optional[str] = None
     preferences: Optional[str] = None
     tech_stack: Optional[str] = None
-    required_skills: Optional[str] = None
-    preferred_skills: Optional[str] = None
-    essential_tech_stack: Optional[str] = None
+    required_skills: Optional[List[float]] = None
+    preferred_skills: Optional[List[float]] = None
+    essential_tech_stack: Optional[List[float]] = None
 
 
 class JobPostCreate(JobPostBase):
