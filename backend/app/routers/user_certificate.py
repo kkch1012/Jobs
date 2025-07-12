@@ -24,8 +24,8 @@ def add_user_certificate(
         raise HTTPException(status_code=404, detail="자격증을 찾을 수 없습니다.")
 
     user_cert = UserCertificate(
-        user_id=current_user.id,
-        certificate_id=cert_master.id,
+        user_id=getattr(current_user, 'id'),
+        certificate_id=getattr(cert_master, 'id'),
         acquired_date=data.acquired_date
     )
     db.add(user_cert)
@@ -34,9 +34,9 @@ def add_user_certificate(
     
     # 응답 스키마에 맞춰 certificate_name 추가해서 반환
     return UserCertificateResponse(
-        id=user_cert.id,
-        certificate_name=cert_master.name,
-        acquired_date=user_cert.acquired_date
+        id=getattr(user_cert, 'id'),
+        certificate_name=getattr(cert_master, 'name'),
+        acquired_date=getattr(user_cert, 'acquired_date')
     )
 
 @router.get("/", 
@@ -59,9 +59,9 @@ def get_my_certificates(
     )
     return [
         UserCertificateResponse(
-            id=user_cert.id,
+            id=getattr(user_cert, 'id'),
             certificate_name=certificate_name,
-            acquired_date=user_cert.acquired_date
+            acquired_date=getattr(user_cert, 'acquired_date')
         )
         for user_cert, certificate_name in user_certs
     ]

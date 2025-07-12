@@ -42,8 +42,8 @@ def add_user_skill_by_name(
     
     # 새 UserSkill 생성 및 저장
     user_skill = UserSkill(
-        user_id=current_user.id,
-        skill_id=skill.id,
+        user_id=getattr(current_user, 'id'),
+        skill_id=getattr(skill, 'id'),
         proficiency=skill_data.proficiency
     )
     db.add(user_skill)
@@ -51,8 +51,8 @@ def add_user_skill_by_name(
     db.refresh(user_skill)
 
     return UserSkillResponse(
-        skill_name=skill.name,
-        proficiency=user_skill.proficiency
+        skill_name=getattr(skill, 'name'),
+        proficiency=getattr(user_skill, 'proficiency')
     )
 
 @router.get("/", 
@@ -79,9 +79,9 @@ def get_user_skills(
     # UserSkill 객체와 skill_name 튜플을 UserSkillResponse 리스트로 변환
     return [
     UserSkillResponse(
-        skill_id=user_skill.id,
+        skill_id=getattr(user_skill, 'id'),
         skill_name=skill_name,
-        proficiency=user_skill.proficiency
+        proficiency=getattr(user_skill, 'proficiency')
     )
     for user_skill, skill_name in user_skills
 ]

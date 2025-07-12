@@ -32,7 +32,7 @@ def test_chat_with_auth():
     }
     
     chat_data = {
-        "session_id": "user_001",
+        "session_id": 1,
         "message": "나의 자격증이 뭐가있나요?"
     }
     

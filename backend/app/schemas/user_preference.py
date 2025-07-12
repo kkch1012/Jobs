@@ -5,9 +5,9 @@ from pydantic import BaseModel
 class JobPostBase(BaseModel):
     title: str
     company_name: str
-    size: str
-    address: str
-    job_required_skill_id: Optional[int]
+    size: Optional[str] = None
+    address: Optional[str] = None
+    job_required_skill_id: Optional[int] = None
     employment_type: Optional[str] = None
     applicant_type: str
     posting_date: datetime

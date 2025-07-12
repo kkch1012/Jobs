@@ -26,9 +26,13 @@ class TokenResponse(BaseModel):
 )
 def login_by_id(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
-    if user.signup_type != "id":
+    if not getattr(user, 'hashed_password', None):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    if not verify_password(form_data.password, getattr(user, 'hashed_password')):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+    if getattr(user, 'signup_type', None) != "id":
         raise HTTPException(status_code=400, detail="아이디 기반 회원이 아닙니다.")
     access_token = create_access_token({"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -49,7 +53,7 @@ def social_login(data: SocialLoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user:
         raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
-    if user.signup_type != "email":
+    if getattr(user, 'signup_type', None) != "email":
         raise HTTPException(status_code=400, detail="소셜 로그인 회원이 아닙니다.")
     access_token = create_access_token({"sub": str(user.id)})
     return {"access_token": access_token, "token_type": "bearer"}

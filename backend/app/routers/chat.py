@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from datetime import datetime
 from fastapi.concurrency import run_in_threadpool
 from openai import OpenAI
@@ -7,12 +7,11 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.config import settings
 from app.models.mongo import MCPMessage
-from app.schemas.mcp import MessageIn, MCPIntent, MCPResponse, MCPMessageOut, MCPContext
+from app.schemas.mcp import MessageIn, MCPIntent, MCPContext
 from app.schemas.job_post import JobPostResponse
 from app.schemas.certificate import CertificateResponse
 from app.schemas.roadmap import RoadmapResponse
 from app.schemas.skill import SkillResponse
-from app.schemas.user import UserResponse
 from app.services.mcp_service import mcp_service
 from app.utils.dependencies import get_current_user
 from app.models.user import User
@@ -20,7 +19,8 @@ from app.models.user_skill import UserSkill
 from app.models.skill import Skill
 from app.models.user_certificate import UserCertificate
 from app.models.certificate import Certificate
-from fastapi import Depends, HTTPException
+from app.models.job_post import JobPost
+from app.models.roadmap import Roadmap
 from typing import Optional
 from app.models.chat_session import ChatSession
 
@@ -96,18 +96,45 @@ async def analyze_and_route(user_message: str, session_id: int | None = None, cu
     # 라우터별 API 호출
     try:
         if intent.router == "/job_posts":
-            job_posts = job_post.read_job_posts(db=db)
+            # 파라미터를 활용한 동적 쿼리 구성
+            query = db.query(JobPost)
+            
+            # 회사명 필터링
+            if intent.parameters.get("company_name"):
+                company_name = intent.parameters["company_name"]
+                query = query.filter(JobPost.company_name.ilike(f"%{company_name}%"))
+            
+            # 직무명 필터링
+            if intent.parameters.get("job_name"):
+                job_name = intent.parameters["job_name"]
+                query = query.filter(JobPost.title.ilike(f"%{job_name}%"))
+            
+            # 개수 제한
+            limit = intent.parameters.get("limit", 20)
+            if isinstance(limit, str):
+                try:
+                    limit = int(limit)
+                except ValueError:
+                    limit = 20
+            
+            # 최대 50개로 제한
+            limit = min(limit, 50)
+            
+            job_posts = query.limit(limit).all()
             # SQLAlchemy 객체를 Pydantic 모델로 변환
             return [JobPostResponse.model_validate(post) for post in job_posts]
         elif intent.router == "/certificates":
-            certificates = certificate.list_all_certificates(db=db)
+            # 직접 데이터베이스에서 조회
+            certificates = db.query(Certificate).all()
             return [CertificateResponse.model_validate(cert) for cert in certificates]
         elif intent.router == "/roadmaps":
-            roadmaps = roadmap.get_all_roadmaps(db=db)
+            # 직접 데이터베이스에서 조회
+            roadmaps = db.query(Roadmap).all()
             return [RoadmapResponse.model_validate(roadmap) for roadmap in roadmaps]
         elif intent.router == "/skills":
-            skill_list = skill_router.list_skills(db=db)
-            return [SkillResponse.model_validate(skill_obj) for skill_obj in skill_list]
+            # 직접 데이터베이스에서 조회
+            skills = db.query(Skill).all()
+            return [SkillResponse.model_validate(skill_obj) for skill_obj in skills]
         elif intent.router == "/user_skills":
             if current_user:
                 try:
@@ -239,23 +266,33 @@ async def chat_with_llm(
         if not session_obj:
             raise HTTPException(status_code=404, detail="존재하지 않는 세션입니다.")
 
-    # 사용자 메시지 저장
-    await mcp_service.save_message(
-        session_id=data.session_id,
-        role="user",
-        content=data.message
+    # 병렬 처리: 메시지 저장과 API 호출을 동시에 실행
+    import asyncio
+    
+    # 사용자 메시지 저장 (백그라운드에서 실행)
+    save_user_message_task = asyncio.create_task(
+        mcp_service.save_message(
+            session_id=data.session_id,
+            role="user",
+            content=data.message
+        )
     )
-
+    
     # API 호출 및 응답 생성
     api_result = await analyze_and_route(data.message, data.session_id, current_user, db)
     answer = await mcp_service.summarize_response(data.message, api_result)
-
-    # AI 응답 저장
-    await mcp_service.save_message(
-        session_id=data.session_id,
-        role="assistant",
-        content=answer,
-        intent=api_result
+    
+    # 사용자 메시지 저장 완료 대기
+    await save_user_message_task
+    
+    # AI 응답 저장 (백그라운드에서 실행)
+    asyncio.create_task(
+        mcp_service.save_message(
+            session_id=data.session_id,
+            role="assistant",
+            content=answer,
+            intent=api_result
+        )
     )
 
     return {"message": answer}

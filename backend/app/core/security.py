@@ -1,5 +1,6 @@
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
+from typing import Optional
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from app.config import settings
@@ -18,7 +19,7 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 # 액세스 토큰 생성
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
@@ -28,8 +29,8 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-# 관리자 권한 체크
-def admin_only(current_user: User = Depends(get_current_user)):
-    if current_user.role != "admin":  # User 모델에서 role 필드가 문자열이라고 가정
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="관리자 권한이 필요합니다.")
-    return current_user
+# 관리자 권한 체크 (현재 User 모델에 role 필드가 없으므로 주석 처리)
+# def admin_only(current_user: User = Depends(get_current_user)):
+#     if getattr(current_user, 'role', None) != "admin":
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="관리자 권한이 필요합니다.")
+#     return current_user

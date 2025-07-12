@@ -38,12 +38,12 @@ Content-Type: application/json
 
 ### 2. 대화 히스토리 조회
 ```http
-GET /chat/history/?session_id=user_session_123&limit=50
+GET /chat/history/?session_id=123&limit=50
 ```
 
 ### 3. MCP 컨텍스트 조회
 ```http
-GET /chat/context/user_session_123
+GET /chat/context/123
 ```
 
 ### 4. 스트리밍 채팅
@@ -52,7 +52,7 @@ POST /chat/stream/
 Content-Type: application/json
 
 {
-  "session_id": "user_session_123",
+  "session_id": 123,
   "message": "자격증 목록을 알려주세요"
 }
 ```
@@ -64,7 +64,7 @@ Content-Type: application/json
 curl -X POST "http://localhost:8000/chat/" \
   -H "Content-Type: application/json" \
   -d '{
-    "session_id": "user_123",
+    "session_id": 123,
     "message": "최근에 올라온 채용공고를 보여주세요"
   }'
 ```
@@ -74,7 +74,7 @@ curl -X POST "http://localhost:8000/chat/" \
 curl -X POST "http://localhost:8000/chat/" \
   -H "Content-Type: application/json" \
   -d '{
-    "session_id": "user_123",
+    "session_id": 123,
     "message": "IT 관련 자격증 목록을 알려주세요"
   }'
 ```
@@ -84,7 +84,7 @@ curl -X POST "http://localhost:8000/chat/" \
 curl -X POST "http://localhost:8000/chat/" \
   -H "Content-Type: application/json" \
   -d '{
-    "session_id": "user_123",
+    "session_id": 123,
     "message": "프로그래밍 언어 목록을 보여주세요"
   }'
 ```
@@ -94,7 +94,7 @@ curl -X POST "http://localhost:8000/chat/" \
 ### MCPMessage 모델
 ```python
 class MCPMessage(Document):
-    session_id: str
+    session_id: int
     role: str  # "user" 또는 "assistant"
     content: str
     created_at: datetime

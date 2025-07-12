@@ -28,9 +28,17 @@ class MCPService:
             "/user_profile",
             "/update_user_profile"
         ]
+        # 간단한 메모리 캐시 (실제 운영에서는 Redis 사용 권장)
+        self._intent_cache = {}
+        self._response_cache = {}
     
     async def analyze_intent(self, user_message: str, context: Optional[MCPContext] = None) -> Optional[MCPIntent]:
         """사용자 메시지의 의도를 분석합니다."""
+        # 캐시 확인
+        cache_key = f"{user_message}:{hash(str(context)) if context else 'none'}"
+        if cache_key in self._intent_cache:
+            return self._intent_cache[cache_key]
+            
         try:
             system_prompt = self._build_system_prompt(context)
             
@@ -47,10 +55,14 @@ class MCPService:
                     {"role": "user", "content": user_message},
                 ],
                 temperature=0.1,
-                max_tokens=500
+                max_tokens=300  # 토큰 수 줄임
             )
             
             response_content = response.choices[0].message.content
+            if response_content is None:
+                print("OpenAI API 응답이 None입니다.")
+                return None
+                
             print(f"OpenAI API 응답 성공: {response_content}")
             
             # JSON 코드 블록에서 JSON 추출
@@ -62,7 +74,10 @@ class MCPService:
             print(f"정제된 JSON: {response_content}")
             
             intent_data = json.loads(response_content)
-            return MCPIntent(**intent_data)
+            intent = MCPIntent(**intent_data)
+            # 캐시에 저장
+            self._intent_cache[cache_key] = intent
+            return intent
         except json.JSONDecodeError as e:
             print(f"JSON 파싱 실패: {e}")
             print(f"응답 내용: {response.choices[0].message.content if 'response' in locals() else '응답 없음'}")
@@ -71,11 +86,15 @@ class MCPService:
             print(f"Intent 분석 실패: {e}")
             print(f"에러 타입: {type(e).__name__}")
             # OpenAI API 에러인 경우 추가 정보 출력
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    print(f"API 응답: {e.response.text}")
-                except:
-                    print(f"API 응답: {e.response}")
+            try:
+                if hasattr(e, 'response'):
+                    response_obj = getattr(e, 'response')
+                    if hasattr(response_obj, 'text'):
+                        print(f"API 응답: {response_obj.text}")
+                    else:
+                        print(f"API 응답: {response_obj}")
+            except Exception as debug_error:
+                print(f"디버그 정보 출력 실패: {debug_error}")
             return None
     
     def _build_system_prompt(self, context: Optional[MCPContext] = None) -> str:
@@ -84,7 +103,8 @@ class MCPService:
             "당신은 채용공고 플랫폼의 AI 도우미입니다. "
             "사용자의 요청을 분석하여 호출해야 할 FastAPI 라우터 경로와 파라미터를 추론하세요. "
             "결과는 반드시 JSON 형식으로 다음처럼 반환해야 합니다:\n"
-            '{ "router": "/job_posts", "parameters": {} }\n\n'
+            '{ "router": "/job_posts", "parameters": {"company_name": "회사명", "limit": 10} }\n\n'
+            "사용자 요청에서 회사명, 직무명, 개수 등을 파라미터로 추출하세요.\n"
             "반환 가능한 router 예시는 다음과 같습니다:\n"
         )
         
@@ -103,7 +123,7 @@ class MCPService:
     def _get_tool_description(self, tool: str) -> str:
         """도구별 설명을 반환합니다."""
         descriptions = {
-            "/job_posts": "전체 채용공고 목록을 조회합니다.",
+            "/job_posts": "채용공고 목록을 조회합니다. parameters에 company_name(회사명), job_name(직무명), limit(개수) 등을 포함할 수 있습니다.",
             "/certificates": "자격증 목록을 조회합니다.",
             "/roadmaps": "취업 로드맵을 조회합니다.",
             "/skills": "기술 스택 목록을 조회합니다.",
@@ -115,7 +135,7 @@ class MCPService:
         }
         return descriptions.get(tool, "지원하지 않는 도구입니다.")
     
-    async def save_message(self, session_id: str, role: str, content: str, 
+    async def save_message(self, session_id: int, role: str, content: str, 
                           intent: Optional[Dict[str, Any] | list | None] = None,
                           tool_calls: Optional[List] = None,
                           tool_results: Optional[List] = None) -> MCPMessage:
@@ -132,7 +152,7 @@ class MCPService:
         await message.insert()
         return message
     
-    async def get_conversation_history(self, session_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_conversation_history(self, session_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         """대화 히스토리를 조회합니다."""
         messages = await MCPMessage.find(
             MCPMessage.session_id == session_id
@@ -152,20 +172,29 @@ class MCPService:
     
     async def summarize_response(self, original_message: str, api_result: Optional[Dict[str, Any] | list]) -> str:
         """API 결과를 자연스러운 응답으로 요약합니다."""
+        # 캐시 확인
+        cache_key = f"{original_message}:{hash(str(api_result)) if api_result else 'none'}"
+        if cache_key in self._response_cache:
+            return self._response_cache[cache_key]
+            
         if api_result is None:
             response = await run_in_threadpool(
                 client.chat.completions.create,
                 model="deepseek/deepseek-chat-v3-0324",
                 messages=[
+                    {"role": "system", "content": "반드시 한국어로만 응답하세요. 영어 응답은 절대 금지합니다."},
                     {"role": "user", "content": original_message}
                 ]
             )
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if content is None:
+                return "응답을 생성할 수 없습니다."
+            return content.strip()
 
         # SQLAlchemy 객체를 딕셔너리로 변환
         serializable_result = self._convert_to_serializable(api_result)
 
-        system_prompt = """다음 데이터를 사용자에게 자연스럽게 설명해 주세요.\n\n응답 작성 규칙:\n- 마크다운, 특수문자, 이모지, 줄바꿈, 강조, 리스트, 표, 코드블록 등 일체 사용 금지\n- 오직 순수한 한글/영문/숫자만 사용\n- 한 문단의 자연스러운 설명으로만 작성\n- 불필요한 장식이나 강조 표시 제거\n- 핵심 정보만 간결하게 전달\n- 친근하지만 전문적인 톤 유지\n- 프론트엔드에서 쉽게 처리할 수 있도록 작성"""
+        system_prompt = """다음 데이터를 사용자에게 자연스럽게 설명해 주세요.\n\n응답 작성 규칙:\n- 반드시 한국어로만 응답하세요\n- 마크다운, 특수문자, 이모지, 줄바꿈, 강조, 리스트, 표, 코드블록 등 일체 사용 금지\n- 오직 순수한 한글/영문/숫자만 사용\n- 한 문단의 자연스러운 설명으로만 작성\n- 불필요한 장식이나 강조 표시 제거\n- 핵심 정보만 간결하게 전달\n- 친근하지만 전문적인 톤 유지\n- 프론트엔드에서 쉽게 처리할 수 있도록 작성\n- 영어 응답은 절대 금지합니다"""
 
         response = await run_in_threadpool(
             client.chat.completions.create,
@@ -178,8 +207,13 @@ class MCPService:
         )
         
         # 응답 후처리: 특수문자 제거
-        content = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if content is None:
+            return "응답을 생성할 수 없습니다."
+        content = content.strip()
         content = self._clean_response_text(content)
+        # 캐시에 저장
+        self._response_cache[cache_key] = content
         return content
     
     def _convert_to_serializable(self, obj: Any) -> Any:
