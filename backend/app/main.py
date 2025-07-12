@@ -19,7 +19,8 @@ from app.routers import (
     user_skill,
     preprocess,
     visualization,
-    chat
+    chat,
+    session
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -41,6 +42,7 @@ app = FastAPI(
 )
 
 # CORS 설정 (임시 전체 허용)
+# TODO: 운영 환경에서는 allow_origins에 실제 도메인만 허용하도록 제한 필요
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -64,3 +66,4 @@ app.include_router(user_skill.router)
 app.include_router(preprocess.router)
 app.include_router(visualization.router)
 app.include_router(chat.router)
+app.include_router(session.router)

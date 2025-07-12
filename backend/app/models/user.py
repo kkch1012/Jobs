@@ -36,3 +36,4 @@ class User(Base):
     user_certificates = relationship("UserCertificate", back_populates="user", cascade="all, delete-orphan")
     user_preferences = relationship("UserPreference", back_populates="user", cascade="all, delete-orphan")
     user_roadmaps = relationship("UserRoadmap", back_populates="user", cascade="all, delete-orphan")
+    chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")

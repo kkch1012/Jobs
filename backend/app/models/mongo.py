@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 class MCPMessage(Document):
-    session_id: str
+    session_id: int  # int로 변경
     role: str  # "user" 또는 "assistant"
     content: str
     created_at: datetime = datetime.utcnow()

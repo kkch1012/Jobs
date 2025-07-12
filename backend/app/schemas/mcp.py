@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 class MessageIn(BaseModel):
-    session_id: str = Field(..., description="채팅 세션 ID")
+    session_id: int = Field(..., description="채팅 세션 ID")
     message: str = Field(..., description="사용자 메시지")
 
 class MCPIntent(BaseModel):
@@ -12,14 +12,14 @@ class MCPIntent(BaseModel):
 
 class MCPMessageOut(BaseModel):
     id: str
-    session_id: str
+    session_id: int
     role: str
     content: str
     created_at: datetime
 
 class MCPResponse(BaseModel):
     message: str = Field(..., description="AI 응답 메시지")
-    session_id: str = Field(..., description="채팅 세션 ID")
+    session_id: int = Field(..., description="채팅 세션 ID")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 class MCPToolCall(BaseModel):
@@ -28,6 +28,6 @@ class MCPToolCall(BaseModel):
 
 class MCPContext(BaseModel):
     user_id: Optional[int] = Field(None, description="사용자 ID")
-    session_id: str = Field(..., description="세션 ID")
+    session_id: int = Field(..., description="세션 ID")
     conversation_history: List[Dict[str, Any]] = Field(default_factory=list, description="대화 히스토리")
     available_tools: List[str] = Field(default_factory=list, description="사용 가능한 도구 목록")

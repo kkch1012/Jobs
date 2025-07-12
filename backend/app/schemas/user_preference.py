@@ -11,7 +11,7 @@ class JobPostBase(BaseModel):
     employment_type: Optional[str] = None
     applicant_type: str
     posting_date: datetime
-    deadline: datetime
+    deadline: Optional[datetime] = None
     main_tasks: Optional[str] = None
     qualifications: Optional[str] = None
     preferences: Optional[str] = None

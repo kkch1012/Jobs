@@ -20,8 +20,9 @@ from app.models.user_skill import UserSkill
 from app.models.skill import Skill
 from app.models.user_certificate import UserCertificate
 from app.models.certificate import Certificate
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from typing import Optional
+from app.models.chat_session import ChatSession
 
 from app.routers import (
     auth,
@@ -54,7 +55,8 @@ async def summarize_response_with_llm(original_message: str, api_result: dict | 
                 {"role": "user", "content": original_message}
             ]
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content if response.choices and response.choices[0].message.content else ""
+        return content.strip()
 
     response = await run_in_threadpool(
         client.chat.completions.create,
@@ -64,16 +66,23 @@ async def summarize_response_with_llm(original_message: str, api_result: dict | 
             {"role": "user", "content": json.dumps(api_result, ensure_ascii=False)}
         ]
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content if response.choices and response.choices[0].message.content else ""
+    return content.strip()
 
-async def analyze_and_route(user_message: str, session_id: str | None = None, current_user: Optional[User] = None) -> dict | list | None:
+async def analyze_and_route(user_message: str, session_id: int | None = None, current_user: Optional[User] = None, db: Session = Depends(get_db)) -> dict | list | None:
     """사용자 메시지를 분석하고 적절한 API를 호출합니다."""
-    
+    # 세션 유효성 체크
+    if session_id:
+        session_obj = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+        if not session_obj:
+            raise HTTPException(status_code=404, detail="존재하지 않는 세션입니다.")
     # MCP 컨텍스트 구성
     context = None
     if session_id:
         conversation_history = await mcp_service.get_conversation_history(session_id, limit=5)
+        user_id = getattr(current_user, 'id', None)
         context = MCPContext(
+            user_id=user_id if isinstance(user_id, int) else None,
             session_id=session_id,
             conversation_history=conversation_history,
             available_tools=mcp_service.available_tools
@@ -85,7 +94,6 @@ async def analyze_and_route(user_message: str, session_id: str | None = None, cu
         return None
 
     # 라우터별 API 호출
-    db: Session = next(get_db())
     try:
         if intent.router == "/job_posts":
             job_posts = job_post.read_job_posts(db=db)
@@ -134,7 +142,7 @@ async def analyze_and_route(user_message: str, session_id: str | None = None, cu
                             cert_details.append({
                                 "certificate_name": cert.name,
                                 "issuer": cert.issuer,
-                                "acquired_date": user_cert.acquired_date.isoformat() if user_cert.acquired_date else None
+                                "acquired_date": user_cert.acquired_date.isoformat() if getattr(user_cert, 'acquired_date', None) is not None else None
                             })
                     return {
                         "user_id": current_user.id,
@@ -155,7 +163,7 @@ async def analyze_and_route(user_message: str, session_id: str | None = None, cu
                         "nickname": current_user.nickname,
                         "name": current_user.name,
                         "phone_number": current_user.phone_number,
-                        "birth_date": current_user.birth_date.isoformat() if current_user.birth_date else None,
+                        "birth_date": current_user.birth_date.isoformat() if getattr(current_user, 'birth_date', None) is not None else None,
                         "gender": current_user.gender,
                         "university": current_user.university,
                         "major": current_user.major,
@@ -222,8 +230,15 @@ MCP(Model Context Protocol)를 사용하여 AI 챗봇과 대화합니다.
 """)
 async def chat_with_llm(
     data: MessageIn,
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    # 세션 유효성 체크
+    if data.session_id:
+        session_obj = db.query(ChatSession).filter(ChatSession.id == data.session_id).first()
+        if not session_obj:
+            raise HTTPException(status_code=404, detail="존재하지 않는 세션입니다.")
+
     # 사용자 메시지 저장
     await mcp_service.save_message(
         session_id=data.session_id,
@@ -232,7 +247,7 @@ async def chat_with_llm(
     )
 
     # API 호출 및 응답 생성
-    api_result = await analyze_and_route(data.message, data.session_id, current_user)
+    api_result = await analyze_and_route(data.message, data.session_id, current_user, db)
     answer = await mcp_service.summarize_response(data.message, api_result)
 
     # AI 응답 저장
@@ -258,7 +273,7 @@ async def chat_with_llm(
 - `session_id`: 조회할 세션 ID (필수)
 - `limit`: 조회할 메시지 개수 (기본값: 50, 최대: 50)
 """)
-async def get_history(session_id: str, limit: int = 50):
+async def get_history(session_id: int, limit: int = 50):
     messages = await MCPMessage.find(
         MCPMessage.session_id == session_id
     ).sort("+created_at").limit(limit).to_list()
@@ -286,7 +301,7 @@ MCP(Model Context Protocol) 컨텍스트 정보를 조회합니다.
 - `/skills`: 기술 스택 조회
 - `/visualizations`: 데이터 시각화
 """)
-async def get_mcp_context(session_id: str):
+async def get_mcp_context(session_id: int):
     """MCP 컨텍스트 정보를 반환합니다."""
     messages = await MCPMessage.find(
         MCPMessage.session_id == session_id
@@ -326,8 +341,15 @@ async def get_mcp_context(session_id: str):
 """)
 async def chat_stream(
     data: MessageIn,
-    current_user: Optional[User] = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
+    # 세션 유효성 체크
+    if data.session_id:
+        session_obj = db.query(ChatSession).filter(ChatSession.id == data.session_id).first()
+        if not session_obj:
+            raise HTTPException(status_code=404, detail="존재하지 않는 세션입니다.")
+
     """스트리밍 채팅 응답을 위한 엔드포인트"""
     user_msg = MCPMessage(
         session_id=data.session_id,
@@ -338,7 +360,7 @@ async def chat_stream(
     await user_msg.insert()
 
     # 의도 분석
-    intent_result = await analyze_and_route(data.message, data.session_id, current_user)
+    intent_result = await analyze_and_route(data.message, data.session_id, current_user, db)
     
     # 응답 생성
     answer = await summarize_response_with_llm(data.message, intent_result)
