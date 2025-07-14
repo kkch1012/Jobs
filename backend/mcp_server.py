@@ -155,7 +155,7 @@ class FastAPIClient:
 # FastAPI 클라이언트 인스턴스
 fastapi_client = FastAPIClient(FASTAPI_SERVER_URL)
 
-@app.get("/")
+@app.get("/", summary="MCP 서버 상태 확인", description="MCP 서버가 정상적으로 동작하는지 확인합니다. 서버 버전과 사용 가능한 도구 목록을 반환합니다.")
 async def root():
     """MCP 서버 상태 확인"""
     return {
@@ -164,7 +164,7 @@ async def root():
         "available_tools": list(AVAILABLE_TOOLS.keys())
     }
 
-@app.get("/tools")
+@app.get("/tools", summary="사용 가능한 도구 목록 조회", description="MCP 서버에 등록된 모든 도구의 이름, 설명, 입력/출력 스키마를 반환합니다.")
 async def list_tools():
     """사용 가능한 도구 목록을 반환합니다."""
     return {
@@ -179,7 +179,7 @@ async def list_tools():
         ]
     }
 
-@app.post("/tools/{tool_name}/call")
+@app.post("/tools/{tool_name}/call", summary="특정 도구 호출", description="지정한 도구 이름과 파라미터로 FastAPI 서버의 기능을 호출하고 결과를 반환합니다.")
 async def call_tool(tool_name: str, request: ToolCallRequest):
     """특정 도구를 호출합니다."""
     if tool_name not in AVAILABLE_TOOLS:
@@ -199,7 +199,7 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"도구 호출 실패: {str(e)}")
 
-@app.post("/chat")
+@app.post("/chat", summary="MCP 프로토콜 채팅", description="MCP 프로토콜을 통해 도구 목록 조회, 도구 호출 등 다양한 기능을 제공합니다.")
 async def chat_with_mcp(request: MCPRequest):
     """MCP 프로토콜을 통한 채팅"""
     if request.method == "tools/list":
@@ -247,7 +247,7 @@ async def chat_with_mcp(request: MCPRequest):
             id=request.id
         )
 
-@app.get("/health")
+@app.get("/health", summary="서버 상태 확인", description="MCP 서버의 헬스체크 엔드포인트. 서버가 정상 동작 중인지 확인합니다.")
 async def health_check():
     """서버 상태 확인"""
     return {"status": "healthy", "timestamp": datetime.utcnow()}
