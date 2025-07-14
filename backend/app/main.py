@@ -41,6 +41,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+@app.get("/")
+async def root():
+    """API 루트 경로"""
+    return {
+        "message": "Recruitment Platform API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "mcp_endpoints": [
+            "/mcp/chat/",
+            "/mcp/tools",
+            "/mcp/health"
+        ]
+    }
+
 # CORS 설정 (임시 전체 허용)
 # TODO: 운영 환경에서는 allow_origins에 실제 도메인만 허용하도록 제한 필요
 app.add_middleware(
