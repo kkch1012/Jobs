@@ -5,18 +5,13 @@ from typing import List
 from app.database import get_db
 from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
-from pydantic import BaseModel
+from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
+from fastapi import Depends
+from app.utils.dependencies import get_current_user
+from app.models.user_skill import UserSkill
+from app.models.user import User
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
-
-class WeeklySkillStat(BaseModel):
-    year: int
-    week: int
-    skill: str
-    count: int
-
-    class Config:
-        from_attributes = True
 
 @router.get(
     "/weekly_skill_frequency",
@@ -88,5 +83,62 @@ def weekly_skill_frequency(
         for skill, count in counter.items():
             response.append(WeeklySkillStat(
                 year=year, week=week, skill=skill, count=count
+            ))
+    return response
+
+@router.get(
+    "/resume_vs_job_skill_trend",
+    summary="내 이력서 vs 직무별 주간 스킬 빈도 비교",
+    description="내 이력서(보유 스킬)와 선택한 직무의 주간 스킬 빈도 통계를 비교하여 강점(보유)/약점(미보유) 스킬을 시각화할 수 있도록 반환합니다.",
+    response_model=List[ResumeSkillComparison]
+)
+async def resume_vs_job_skill_trend(
+    job_name: str = Query(..., description="비교할 직무명 (예: 백엔드 개발자)"),
+    field: str = Query(
+        "tech_stack",
+        enum=[
+            "tech_stack", "qualifications", "preferences",
+            "required_skills", "preferred_skills", "essential_tech_stack"
+        ],
+        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 1. 내 이력서(보유 스킬) 조회
+    user_skills = db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()
+    my_skill_set = set()
+    for us in user_skills:
+        if hasattr(us, 'skill') and us.skill and hasattr(us.skill, 'name'):
+            my_skill_set.add(us.skill.name)
+        elif hasattr(us, 'skill_name'):
+            my_skill_set.add(us.skill_name)
+
+    # 2. 직무별 주간 스킬 빈도 데이터 조회 (기존 함수 재활용)
+    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
+    if not job_role:
+        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
+    job_role_id = job_role.id
+    posts = db.query(
+        func.date_part('year', JobPost.posting_date).label('year'),
+        func.date_part('week', JobPost.posting_date).label('week'),
+        getattr(JobPost, field)
+    ).filter(
+        JobPost.job_required_skill_id == job_role_id
+    ).all()
+    from collections import Counter, defaultdict
+    week_skill_counter = defaultdict(Counter)
+    for row in posts:
+        year, week, field_value = int(row.year), int(row.week), row[2]
+        if isinstance(field_value, str) and field_value.strip():
+            skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            week_skill_counter[(year, week)].update(skills)
+    # 3. 강점/약점 비교 및 응답 생성
+    response = []
+    for (year, week), counter in week_skill_counter.items():
+        for skill, count in counter.items():
+            status = "강점" if skill in my_skill_set else "약점"
+            response.append(ResumeSkillComparison(
+                skill=skill, count=count, status=status, year=year, week=week
             ))
     return response

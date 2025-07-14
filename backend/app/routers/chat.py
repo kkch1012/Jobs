@@ -126,10 +126,19 @@ MCP 서버의 도구를 호출한 결과를 LLM이 자연어로 요약/설명/�
 """)
 async def chat_with_llm(
     data: MessageIn,
-    model: str = Body("openai/gpt-4-1106-preview"),
+    model: str = Body("qwen/qwen-plus", example="qwen/qwen-plus"),
     current_user: Optional[User] = Depends(lambda: None),
     db: Session = Depends(get_db)
 ):
+    # 0. Save user message to MongoDB
+    user_msg = MCPMessage(
+        session_id=data.session_id,
+        role="user",
+        content=data.message,
+        created_at=datetime.utcnow()
+    )
+    await user_msg.insert()
+
     # 1. LLM으로 intent 분석
     available_intents = INTENT_LIST
     intent_json = await llm_client.analyze_intent(data.message, available_intents)
@@ -145,7 +154,16 @@ async def chat_with_llm(
         try:
             mcp_result = await mcp_client.call_tool(intent, parameters)
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"MCP 도구 호출 실패: {str(e)}"})
+            # Save error response as assistant message
+            error_content = f"MCP 도구 호출 실패: {str(e)}"
+            assistant_msg = MCPMessage(
+                session_id=data.session_id,
+                role="assistant",
+                content=error_content,
+                created_at=datetime.utcnow()
+            )
+            await assistant_msg.insert()
+            return JSONResponse(status_code=500, content={"error": error_content})
 
     # 3. LLM에 MCP 결과를 프롬프트로 넣어 자연어 응답 생성
     if mcp_result is not None:
@@ -161,18 +179,51 @@ async def chat_with_llm(
             {"role": "user", "content": summary_prompt}
         ]
         llm_summary = await llm_client.chat_completion(messages, model=model)
-        return {"answer": (llm_summary or "요약 생성 실패").strip(), "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
+        answer = (llm_summary or "요약 생성 실패").strip()
+        # Save assistant message
+        assistant_msg = MCPMessage(
+            session_id=data.session_id,
+            role="assistant",
+            content=answer,
+            created_at=datetime.utcnow()
+        )
+        await assistant_msg.insert()
+        return {"answer": answer, "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
 
     # 4. 기타 intent(이력서 등)는 기존대로 처리(예시)
     if intent.startswith("resume_"):
         if not current_user:
-            return JSONResponse(status_code=401, content={"error": "로그인이 필요합니다.", "action": "login"})
+            error_content = "로그인이 필요합니다."
+            assistant_msg = MCPMessage(
+                session_id=data.session_id,
+                role="assistant",
+                content=error_content,
+                created_at=datetime.utcnow()
+            )
+            await assistant_msg.insert()
+            return JSONResponse(status_code=401, content={"error": error_content, "action": "login"})
         # 실제 이력서 처리 로직은 별도 구현 필요
-        return {"answer": "이력서 관련 intent 처리 로직 필요", "intent": intent, "parameters": parameters}
+        answer = "이력서 관련 intent 처리 로직 필요"
+        assistant_msg = MCPMessage(
+            session_id=data.session_id,
+            role="assistant",
+            content=answer,
+            created_at=datetime.utcnow()
+        )
+        await assistant_msg.insert()
+        return {"answer": answer, "intent": intent, "parameters": parameters}
 
     # 5. 일반 대화
     general_answer = await llm_client.generate_response(data.message)
-    return {"answer": (general_answer or "응답 생성 실패").strip(), "intent": intent, "parameters": parameters}
+    answer = (general_answer or "응답 생성 실패").strip()
+    assistant_msg = MCPMessage(
+        session_id=data.session_id,
+        role="assistant",
+        content=answer,
+        created_at=datetime.utcnow()
+    )
+    await assistant_msg.insert()
+    return {"answer": answer, "intent": intent, "parameters": parameters}
 
 @router.get("/history", summary="세션별 채팅 이력 조회", description="특정 세션 ID의 모든 채팅 메시지(유저/AI)를 시간순으로 반환합니다.")
 async def get_chat_history(session_id: int):
