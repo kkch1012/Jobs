@@ -11,3 +11,8 @@ async def init_mongo():
         database=motor_client[settings.MONGO_DB_NAME],
         document_models=[JobPosting, MCPMessage],  # 여기에 새 모델 전달
     )
+
+async def close_mongo():
+    """MongoDB 연결을 안전하게 종료합니다."""
+    if motor_client:
+        motor_client.close()

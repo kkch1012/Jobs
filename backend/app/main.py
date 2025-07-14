@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
-from app.database.mongo import init_mongo
+from app.database.mongo import init_mongo, close_mongo
 from dotenv import load_dotenv
 from app.routers import (
     auth,
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     await init_mongo()
     # 애플리케이션 실행
     yield
+    # 앱 종료 시 MongoDB 연결 정리
+    await close_mongo()
 
 # FastAPI 앱 생성
 app = FastAPI(
