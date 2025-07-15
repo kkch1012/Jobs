@@ -94,7 +94,7 @@ def call_qwen_api(prompt: str, api_key: str) -> str:
         "X-Title": "Job Recommender"
     }
     body = {
-        "model": "qwen/qwen3-32b:free",
+        "model": "qwen/qwen3-4b:free",
         "messages": [
             {"role": "system", "content": "너는 채용 공고 추천 전문가야."},
             {"role": "user", "content": prompt}

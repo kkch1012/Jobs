@@ -21,7 +21,7 @@ class OpenRouterClient:
     async def chat_completion(
         self,
         messages: List[ChatCompletionMessageParam],
-        model: str = "openai/qwen/qwen-plus",
+        model: str = "qwen/qwen-vl-max",
         temperature: float = 0.7,
         max_tokens: int = 1000,
         extra_headers: dict = {},

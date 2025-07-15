@@ -57,7 +57,7 @@ API_INTENT_PARAMETERS = {
 # intent 목록만 단순 리스트로 유지
 INTENT_LIST = [
     "job_posts", "certificates", "skills", "roadmaps", "visualization",
-    "resume_update", "resume_add", "resume_delete", "page_move", "general"
+    "get_my_resume", "update_resume", "page_move", "general"
 ]
 
 def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, Any]:
@@ -127,7 +127,7 @@ MCP 서버의 도구를 호출한 결과를 LLM이 자연어로 요약/설명/�
 """)
 async def chat_with_llm(
     data: MessageIn,
-    model: str = Body("qwen/qwen-plus", example="qwen/qwen-plus"),
+    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -175,11 +175,11 @@ async def chat_with_llm(
 
 사용자에게 친절하고 명확하게 요약/설명/추천을 자연어로 생성하세요.
 """
-        messages: list[ChatCompletionMessageParam] = [
+        summary_messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": "당신은 취업/직무 관련 정보를 요약/설명/추천하는 AI 어시스턴트입니다. 한국어로 자연스럽게 답변하세요."},
             {"role": "user", "content": summary_prompt}
         ]
-        llm_summary = await llm_client.chat_completion(messages, model=model)
+        llm_summary = await llm_client.chat_completion(summary_messages, model=model)
         answer = (llm_summary or "요약 생성 실패").strip()
         # Save assistant message
         assistant_msg = MCPMessage(
@@ -204,7 +204,33 @@ async def chat_with_llm(
             await assistant_msg.insert()
             return JSONResponse(status_code=401, content={"error": error_content, "action": "login"})
         # 실제 이력서 처리 로직은 별도 구현 필요
-        answer = "이력서 관련 intent 처리 로직 필요"
+        try:
+            mcp_result = await mcp_client.call_tool(intent, parameters)
+        except Exception as e:
+            error_content = f"이력서 도구 호출 실패: {str(e)}"
+            assistant_msg = MCPMessage(
+                session_id=data.session_id,
+                role="assistant",
+                content=error_content,
+                created_at=datetime.utcnow()
+            )
+            await assistant_msg.insert()
+            return JSONResponse(status_code=500, content={"error": error_content})
+
+        # LLM 요약/설명
+        summary_prompt = f"""
+아래는 사용자의 요청 intent와 MCP 서버에서 받아온 원본 데이터입니다.
+- intent: {intent}
+- 원본 데이터: {json.dumps(mcp_result, ensure_ascii=False)}
+
+사용자에게 친절하고 명확하게 요약/설명/추천을 자연어로 생성하세요.
+"""
+        resume_messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": "당신은 취업/직무 관련 정보를 요약/설명/추천하는 AI 어시스턴트입니다. 한국어로 자연스럽게 답변하세요."},
+            {"role": "user", "content": summary_prompt}
+        ]
+        llm_summary = await llm_client.chat_completion(resume_messages, model=model)
+        answer = (llm_summary or "요약 생성 실패").strip()
         assistant_msg = MCPMessage(
             session_id=data.session_id,
             role="assistant",
@@ -212,7 +238,7 @@ async def chat_with_llm(
             created_at=datetime.utcnow()
         )
         await assistant_msg.insert()
-        return {"answer": answer, "intent": intent, "parameters": parameters}
+        return {"answer": answer, "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
 
     # 5. 일반 대화
     general_answer = await llm_client.generate_response(data.message)
