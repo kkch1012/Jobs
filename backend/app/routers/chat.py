@@ -10,11 +10,12 @@ from app.services.llm_client import llm_client
 from app.utils.dependencies import get_current_user
 from app.models.user import User
 from app.models.chat_session import ChatSession
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import re
 from app.models.job_post import JobPost
 from fastapi.responses import JSONResponse
 from openai.types.chat import ChatCompletionMessageParam
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/mcp_chat", tags=["mcp_chat"])
 
@@ -127,7 +128,7 @@ MCP 서버의 도구를 호출한 결과를 LLM이 자연어로 요약/설명/�
 async def chat_with_llm(
     data: MessageIn,
     model: str = Body("qwen/qwen-plus", example="qwen/qwen-plus"),
-    current_user: Optional[User] = Depends(lambda: None),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # 0. Save user message to MongoDB

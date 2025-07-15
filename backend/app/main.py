@@ -17,7 +17,6 @@ from app.routers import (
     job_post,
     user_certificate,
     user_skill,
-    preprocess,
     visualization,
     chat,
     session
@@ -79,7 +78,6 @@ app.include_router(user_roadmap.router)
 app.include_router(job_post.router)
 app.include_router(user_certificate.router)
 app.include_router(user_skill.router)
-app.include_router(preprocess.router)
 app.include_router(visualization.router)
 app.include_router(chat.router)
 app.include_router(session.router)

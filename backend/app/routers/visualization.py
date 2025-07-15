@@ -34,9 +34,6 @@ router = APIRouter(prefix="/visualization", tags=["Visualization"])
   { "year": 2025, "week": 28, "skill": "SQL", "count": 7 },
   { "year": 2025, "week": 27, "skill": "Java", "count": 5 }
 ]
-bash
-복사
-편집
 """,
     response_model=List[WeeklySkillStat]
 )
@@ -84,6 +81,8 @@ def weekly_skill_frequency(
             response.append(WeeklySkillStat(
                 year=year, week=week, skill=skill, count=count
             ))
+    # count 기준 내림차순 정렬
+    response = sorted(response, key=lambda x: x.count, reverse=True)
     return response
 
 @router.get(

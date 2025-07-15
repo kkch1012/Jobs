@@ -1,9 +1,10 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
-from pgvector.sqlalchemy import Vector
 from app.models.job_required_skill import JobRequiredSkill
+from pgvector.sqlalchemy import Vector
 
 class JobPost(Base):
     __tablename__ = "job_posts"
@@ -25,10 +26,10 @@ class JobPost(Base):
     preferences = Column(Text, nullable=True)  # 우대 사항
     tech_stack = Column(Text, nullable=True)  # 기술 스택 요약
 
-    # pgvector 타입 컬럼 (벡터 길이 지정 필요, 예: 300)
-    required_skills = Column(Vector(1024), nullable=True)  
-    preferred_skills = Column(Vector(1024), nullable=True)  
-    essential_tech_stack = Column(Vector(1024), nullable=True) 
+    # JSONB 타입 컬럼
+    required_skills = Column(JSONB, nullable=True)  
+    preferred_skills = Column(JSONB, nullable=True)  
+    main_tasks_skills = Column(JSONB, nullable=True) 
 
     full_embedding = Column(Vector(1024), nullable=False)  # 전체 임베딩 추가
 

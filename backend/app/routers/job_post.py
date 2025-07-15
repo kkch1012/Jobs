@@ -24,7 +24,13 @@ router = APIRouter(prefix="/job_posts", tags=["job_posts"])
 """
 )
 def create_job_post(job_post: JobPostCreate, db: Session = Depends(get_db)):
-    db_job = JobPost(**job_post.dict())
+    job_data = job_post.dict()
+    
+    # full_embedding이 제공되지 않은 경우 기본값을 빈 리스트로 설정
+    if job_data.get('full_embedding') is None:
+        job_data['full_embedding'] = []
+    
+    db_job = JobPost(**job_data)
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
