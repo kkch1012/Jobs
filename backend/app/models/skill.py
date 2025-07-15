@@ -8,5 +8,6 @@ class Skill(Base):
 
     id = Column(Integer, primary_key=True, index=True)    # 스킬 ID
     name = Column(String, nullable=False)                 # 기술명
+    category = Column(String, nullable=True)              # 카테고리
     
     user_skills = relationship("UserSkill", back_populates="skill")

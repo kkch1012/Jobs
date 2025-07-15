@@ -22,8 +22,7 @@ router = APIRouter(prefix="/skills", tags=["Skills"])
 """
 )
 def list_skills(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
     skills = db.query(Skill).all()
     return skills

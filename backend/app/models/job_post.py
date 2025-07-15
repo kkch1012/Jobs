@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
 from app.models.job_required_skill import JobRequiredSkill
+from app.models.user_similarity import UserSimilarity
 from pgvector.sqlalchemy import Vector
 
 class JobPost(Base):
@@ -38,4 +39,4 @@ class JobPost(Base):
     # 관계 설정 (선택사항)
     job_required_skill = relationship("JobRequiredSkill", backref="job_posts")
     liked_by = relationship("UserPreference", back_populates="job_posting", cascade="all, delete-orphan")
-
+    user_similarities = relationship("UserSimilarity", back_populates="job_post", cascade="all, delete-orphan")
