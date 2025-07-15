@@ -11,7 +11,7 @@ class Roadmap(Base):
     type = Column(String, nullable=False)                            # ex) 부트캠프, 코스
     skill_description = Column(JSON, nullable=False)                 # 컨텐츠 설명
     start_date = Column(DateTime, nullable=False)                    # 시작일
-    end_date = Column(DateTime, nullable=False)                      # 마감일
+    end_date = Column(DateTime, nullable=True)                      # 마감일
     status = Column(String, nullable=False)                          # 상태 (예: 진행 중, 완료 등)
     deadline = Column(DateTime, nullable=True)                       # 마감일(선택, null 허용)
     location = Column(String, nullable=True)                         # 장소

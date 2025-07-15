@@ -5,8 +5,10 @@ from app.models.user import User
 from app.database import get_db
 from sqlalchemy.orm import Session
 from app.config import settings 
+from typing import Optional
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)
 
 # JWT 토큰에서 현재 사용자 가져오기
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -18,10 +20,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         print("JWT payload:", payload)  # 토큰 디코딩 결과 확인
-        user_id: int = int(payload.get("sub"))  # ← 이 값이 None이면 실패
-        if user_id is None:
+        user_id_str = payload.get("sub")
+        if user_id_str is None:
             print(" 'sub' not in payload")
             raise credentials_exception
+        user_id: int = int(user_id_str)
     except JWTError as e:
         print(" JWT decode error:", e)
         raise credentials_exception
@@ -32,5 +35,20 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
 
     print("인증된 유저:", user.id, user.email)
+    return user
+
+def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme_optional), db: Session = Depends(get_db)) -> Optional[User]:
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id_str = payload.get("sub")
+        if user_id_str is None:
+            return None
+        user_id = int(user_id_str)
+    except (JWTError, ValueError):
+        return None
+    
+    user = db.query(User).filter(User.id == user_id).first()
     return user
 

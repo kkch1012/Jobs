@@ -10,5 +10,5 @@ class UserSimilarity(Base):
     job_post_id = Column(Integer, ForeignKey("job_posts.id", ondelete="CASCADE"), nullable=False)
     similarity = Column(VARCHAR, nullable=False)  # 유사도,적합도 (예: 56)
 
-    user = relationship("User", back_populates="user_similarities")      
-    job_post = relationship("JobPost", back_populates="user_similarities")  
+UserSimilarity.job_post = relationship("JobPost", back_populates="user_similarities")
+UserSimilarity.user = relationship("User", back_populates="user_similarities")

@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, or_, null
 from typing import List, Optional
 from app.database import get_db
 from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
+from app.models.user import User
+from app.models.user_similarity import UserSimilarity
 from app.schemas.job_post import JobPostCreate, JobPostResponse
+from app.utils.dependencies import get_optional_current_user
 
 router = APIRouter(prefix="/job_posts", tags=["job_posts"])
 
@@ -47,6 +50,7 @@ def create_job_post(job_post: JobPostCreate, db: Session = Depends(get_db)):
     - 기본적으로 50건씩 페이징하여 반환합니다.\n
     - `company_name`, `job_name`, `applicant_type`, `employment_type`, `tech_stack` 쿼리 파라미터로 필터링이 가능합니다.\n
     - `limit`(최대 반환 개수, 기본 50, 최대 100), `offset`(시작 위치) 쿼리 파라미터로 페이지네이션이 가능합니다.\n
+    - **로그인 시, 해당 유저와 공고의 유사도를 함께 반환합니다.**
     - 마감일(deadline)이 null인 경우 "상시채용"으로 반환합니다.
     """
 )
@@ -54,13 +58,26 @@ def read_job_posts(
     db: Session = Depends(get_db),
     limit: int = Query(50, ge=1, le=100, description="한 번에 가져올 최대 공고 수 (최대 100, 기본 50)"),
     offset: int = Query(0, ge=0, description="가져올 시작 위치 (0부터 시작)"),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     company_name: Optional[str] = Query(None, description="회사명으로 필터링"),
     job_name: Optional[str] = Query(None, description="직무명으로 필터링"),
     applicant_type: Optional[str] = Query(None, description="지원자격으로 필터링"),
     employment_type: Optional[str] = Query(None, description="고용형태로 필터링"),
     tech_stack: Optional[str] = Query(None, description="기술스택(포함여부)로 필터링")
 ):
-    query = db.query(JobPost).options(joinedload(JobPost.job_required_skill))
+    if current_user:
+        query = db.query(JobPost, UserSimilarity.similarity).outerjoin(
+            UserSimilarity,
+            and_(
+                JobPost.id == UserSimilarity.job_post_id,
+                UserSimilarity.user_id == current_user.id
+            )
+        )
+    else:
+        query = db.query(JobPost, null().label('similarity'))
+
+    query = query.options(joinedload(JobPost.job_required_skill))
+
     # 동적 필터링
     filters = []
     if company_name:
@@ -82,14 +99,15 @@ def read_job_posts(
         filters.append(JobRequiredSkill.job_name.ilike(f"%{job_name}%"))
     if filters:
         query = query.filter(and_(*filters))
-    job_posts = query.offset(offset).limit(limit).all()
+    
+    job_posts_with_similarity = query.offset(offset).limit(limit).all()
+
     result = []
-    for job in job_posts:
-        # SQLAlchemy 객체의 __dict__에는 _sa_instance_state 등이 포함되므로, Pydantic 변환 사용
-        job_data = JobPostResponse.model_validate(job)
-        job_data = job_data.model_dump()
-        # deadline이 None이면 그대로 둠 (프론트에서 "상시채용" 처리)
-        result.append(job_data)
+    for job, similarity in job_posts_with_similarity:
+        response_item = JobPostResponse.model_validate(job)
+        response_item.similarity = similarity
+        result.append(response_item)
+
     return result
 
 

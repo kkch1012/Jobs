@@ -39,4 +39,4 @@ class JobPost(Base):
     # 관계 설정 (선택사항)
     job_required_skill = relationship("JobRequiredSkill", backref="job_posts")
     liked_by = relationship("UserPreference", back_populates="job_posting", cascade="all, delete-orphan")
-    user_similarities = relationship("UserSimilarity", back_populates="job_post", cascade="all, delete-orphan")
+JobPost.user_similarities = relationship("UserSimilarity", back_populates="job_post", cascade="all, delete-orphan")

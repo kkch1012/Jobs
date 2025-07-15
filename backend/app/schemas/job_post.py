@@ -42,6 +42,7 @@ class JobPostResponse(BaseModel):
     preferences: Optional[str] = None
     tech_stack: Optional[str] = None
     created_at: datetime
+    similarity: Optional[float] = None
 
     class Config:
         from_attributes = True

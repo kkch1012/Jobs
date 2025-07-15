@@ -2,14 +2,12 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-class ChatSessionBase(BaseModel):
-    user_id: int
-
-class ChatSessionCreate(ChatSessionBase):
+class ChatSessionCreate(BaseModel):
     pass
 
-class ChatSessionResponse(ChatSessionBase):
+class ChatSessionResponse(BaseModel):
     id: int
+    user_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

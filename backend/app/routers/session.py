@@ -3,15 +3,23 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.chat_session import ChatSession
 from app.schemas.chat_session import ChatSessionCreate, ChatSessionResponse
-from typing import List
-from app.utils.dependencies import get_current_user
+from typing import List, Optional
+from app.utils.dependencies import get_current_user, get_optional_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/chat_sessions", tags=["chat_sessions"])
 
 @router.post("/", response_model=ChatSessionResponse, summary="새 채팅 세션 생성")
-def create_chat_session(session: ChatSessionCreate, db: Session = Depends(get_db)):
-    db_session = ChatSession(**session.dict())
+def create_chat_session(
+    session: ChatSessionCreate,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
+    data = session.dict(exclude={"user_id"})
+    if current_user:
+        db_session = ChatSession(**data, user_id=current_user.id)
+    else:
+        db_session = ChatSession(**data)
     db.add(db_session)
     db.commit()
     db.refresh(db_session)

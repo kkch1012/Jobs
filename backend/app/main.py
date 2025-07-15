@@ -19,7 +19,8 @@ from app.routers import (
     user_skill,
     visualization,
     chat,
-    session
+    session,
+    todo_list
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -81,3 +82,4 @@ app.include_router(user_skill.router)
 app.include_router(visualization.router)
 app.include_router(chat.router)
 app.include_router(session.router)
+app.include_router(todo_list.router)
