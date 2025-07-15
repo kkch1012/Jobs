@@ -23,6 +23,31 @@ class MCPClient:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"MCP 서버 연결 실패: {str(e)}")
     
+    async def call_tool_with_auth(self, tool_name: str, arguments: Dict[str, Any], auth_token: str) -> Dict[str, Any]:
+        """인증 토큰과 함께 특정 도구를 호출합니다."""
+        try:
+            payload = {
+                "name": tool_name,
+                "arguments": arguments,
+                "authorization": auth_token
+            }
+            response = await self.client.post(
+                f"{self.mcp_server_url}/tools/{tool_name}/call",
+                json=payload
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # content에서 text 추출
+                content = data.get("content", [])
+                if content and len(content) > 0:
+                    text_content = content[0].get("text", "{}")
+                    return json.loads(text_content)
+                return {}
+            else:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"도구 호출 실패: {str(e)}")
+    
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """특정 도구를 호출합니다."""
         try:

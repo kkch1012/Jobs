@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List, Any
 from datetime import datetime
 from pydantic import BaseModel
 
@@ -16,8 +16,8 @@ class JobPostBase(BaseModel):
     qualifications: Optional[str] = None
     preferences: Optional[str] = None
     tech_stack: Optional[str] = None
-    required_skills: Optional[str] = None
-    preferred_skills: Optional[str] = None
+    required_skills: Optional[List[Any]] = None
+    preferred_skills: Optional[List[Any]] = None
     essential_tech_stack: Optional[str] = None
 
     class Config:

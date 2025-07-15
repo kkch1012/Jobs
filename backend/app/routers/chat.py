@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, HTTPException, Depends, Body
+from fastapi import APIRouter, HTTPException, Depends, Body, Request
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -127,9 +127,10 @@ MCP 서버의 도구를 호출한 결과를 LLM이 자연어로 요약/설명/�
 """)
 async def chat_with_llm(
     data: MessageIn,
-    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max"),
+    request: Request,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
 ):
     # 0. Save user message to MongoDB
     user_msg = MCPMessage(
@@ -191,8 +192,8 @@ async def chat_with_llm(
         await assistant_msg.insert()
         return {"answer": answer, "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
 
-    # 4. 기타 intent(이력서 등)는 기존대로 처리(예시)
-    if intent.startswith("resume_"):
+    # 4. 이력서 관련 intent 처리
+    if intent in ["get_my_resume", "update_resume"]:
         if not current_user:
             error_content = "로그인이 필요합니다."
             assistant_msg = MCPMessage(
@@ -203,9 +204,23 @@ async def chat_with_llm(
             )
             await assistant_msg.insert()
             return JSONResponse(status_code=401, content={"error": error_content, "action": "login"})
-        # 실제 이력서 처리 로직은 별도 구현 필요
+        
+        # MCP 서버 호출 시 인증 토큰 전달
         try:
-            mcp_result = await mcp_client.call_tool(intent, parameters)
+            # Request에서 Authorization 헤더 추출
+            auth_header = request.headers.get("authorization")
+            if not auth_header:
+                error_content = "인증 토큰이 필요합니다."
+                assistant_msg = MCPMessage(
+                    session_id=data.session_id,
+                    role="assistant",
+                    content=error_content,
+                    created_at=datetime.utcnow()
+                )
+                await assistant_msg.insert()
+                return JSONResponse(status_code=401, content={"error": error_content})
+            
+            mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
         except Exception as e:
             error_content = f"이력서 도구 호출 실패: {str(e)}"
             assistant_msg = MCPMessage(

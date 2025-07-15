@@ -59,14 +59,30 @@ class OpenRouterClient:
 
 - 사용 가능한 API 목록:
 {json.dumps(available_apis, ensure_ascii=False, indent=2)}
+
+**중요한 Intent 분류 규칙:**
+1. **이력서 관련 질문**은 반드시 해당 intent로 분류:
+   - "내 이력서", "이력서 보여줘", "내 정보", "내 대학교", "내 학력", "내 경력" → `get_my_resume`
+   - "이력서 수정", "이력서 업데이트", "이력서 추가" → `update_resume`
+
+2. **채용공고 관련 질문**:
+   - "채용공고", "구인", "일자리", "회사" → `job_posts`
+   - "기술", "스킬", "기술스택" → `skills`
+   - "자격증", "증명서" → `certificates`
+   - "로드맵", "학습경로" → `roadmaps`
+
+3. **시각화 관련 질문**:
+   - "분석", "통계", "차트", "그래프" → `visualization`
+
 - 각 intent에 대해 추출 가능한 모든 파라미터(예: company_name, job_name, applicant_type, employment_type, tech_stack 등)를 최대한 많이 추출하세요.
 - 파라미터는 null로 두지 말고, 메시지에서 추출 가능한 값이 하나라도 있으면 반드시 포함하세요.
 - 하나의 조건만 있어도 검색이 가능하니, 일부 파라미터만 추출되어도 모두 포함하세요.
 - 반드시 코드블록(예: ```json ... ```) 없이, 순수한 JSON만 반환하세요.
-- 예시:
-  {{"intent": "job_posts", "confidence": 0.95, "parameters": {{"company_name": "더스윙"}}, "reasoning": "사용자가 '더스윙 채용공고 조회해줘'라고 요청했으므로, 회사명을 추출함."}}
-  {{"intent": "job_posts", "confidence": 0.9, "parameters": {{"job_name": "백엔드 개발자"}}, "reasoning": "직무명을 추출함."}}
-  {{"intent": "job_posts", "confidence": 0.85, "parameters": {{"applicant_type": "신입", "employment_type": "정규직"}}, "reasoning": "지원자격과 고용형태를 추출함."}}
+
+**예시:**
+  {{"intent": "get_my_resume", "confidence": 0.95, "parameters": {{}}, "reasoning": "사용자가 '내 대학교 조회해줘'라고 요청했으므로, 이력서 조회 intent로 분류함."}}
+  {{"intent": "get_my_resume", "confidence": 0.9, "parameters": {{}}, "reasoning": "사용자가 '내 이력서 보여줘'라고 요청했으므로, 이력서 조회 intent로 분류함."}}
+  {{"intent": "job_posts", "confidence": 0.85, "parameters": {{"company_name": "더스윙"}}, "reasoning": "사용자가 '더스윙 채용공고 조회해줘'라고 요청했으므로, 회사명을 추출함."}}
 
 다음 JSON 형식으로 응답하세요:
 {{

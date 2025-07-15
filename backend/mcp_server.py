@@ -108,6 +108,54 @@ AVAILABLE_TOOLS = {
                 "total": {"type": "integer"}
             }
         }
+    ),
+    "visualization": MCPTool(
+        name="visualization",
+        description="직무별 스킬 빈도 시각화 데이터를 조회합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_name": {"type": "string", "description": "직무명"},
+                "field": {"type": "string", "description": "분석 필드", "default": "tech_stack"}
+            }
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "weekly_skill_frequency": {"type": "array", "items": {"type": "object"}},
+                "total": {"type": "integer"}
+            }
+        }
+    ),
+    "get_my_resume": MCPTool(
+        name="get_my_resume",
+        description="내 이력서 정보를 조회합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {}
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "resume": {"type": "object", "description": "이력서 정보"}
+            }
+        }
+    ),
+    "update_resume": MCPTool(
+        name="update_resume",
+        description="이력서 정보를 수정/입력합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "resume_data": {"type": "object", "description": "수정할 이력서 데이터"}
+            }
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "수정 결과 메시지"}
+            }
+        }
     )
 }
 
@@ -125,6 +173,7 @@ class MCPResponse(BaseModel):
 class ToolCallRequest(BaseModel):
     name: str
     arguments: Dict[str, Any]
+    authorization: Optional[str] = None  # Bearer 토큰
 
 class ToolCallResponse(BaseModel):
     content: List[Dict[str, Any]]
@@ -135,15 +184,17 @@ class FastAPIClient:
         self.base_url = base_url
         self.client = httpx.AsyncClient()
     
-    async def call_api(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def call_api(self, endpoint: str, params: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """FastAPI 서버의 엔드포인트를 호출합니다."""
         try:
             url = f"{self.base_url}{endpoint}"
+            request_headers = headers or {}
+            
             if params:
                 # GET 요청의 경우 쿼리 파라미터로 전달
-                response = await self.client.get(url, params=params, follow_redirects=True)
+                response = await self.client.get(url, params=params, headers=request_headers, follow_redirects=True)
             else:
-                response = await self.client.get(url, follow_redirects=True)
+                response = await self.client.get(url, headers=request_headers, follow_redirects=True)
             
             if response.status_code == 200:
                 return response.json()
@@ -151,6 +202,20 @@ class FastAPIClient:
                 raise HTTPException(status_code=response.status_code, detail=response.text)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"FastAPI 서버 호출 실패: {str(e)}")
+    
+    async def put_api(self, endpoint: str, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        """FastAPI 서버의 PUT 엔드포인트를 호출합니다."""
+        try:
+            url = f"{self.base_url}{endpoint}"
+            request_headers = headers or {}
+            response = await self.client.put(url, json=data, headers=request_headers, follow_redirects=True)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"FastAPI 서버 PUT 호출 실패: {str(e)}")
 
 # FastAPI 클라이언트 인스턴스
 fastapi_client = FastAPIClient(FASTAPI_SERVER_URL)
@@ -186,16 +251,49 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
         raise HTTPException(status_code=404, detail=f"도구 '{tool_name}'을 찾을 수 없습니다")
     
     try:
-        # FastAPI 서버의 해당 엔드포인트 호출
-        endpoint = f"/{tool_name}/"
-        result = await fastapi_client.call_api(endpoint, request.arguments)
+        # 도구별 엔드포인트 매핑
+        endpoint_mapping = {
+            "job_posts": "/job_posts/",
+            "certificates": "/certificates/",
+            "skills": "/skills/",
+            "roadmaps": "/roadmaps/",
+            "visualization": "/visualization/weekly_skill_frequency",
+            "get_my_resume": "/users/me/resume",
+            "update_resume": "/users/me/resume"
+        }
         
-        return ToolCallResponse(content=[
-            {
-                "type": "text",
-                "text": json.dumps(result, ensure_ascii=False)
-            }
-        ])
+        endpoint = endpoint_mapping.get(tool_name)
+        if not endpoint:
+            raise HTTPException(status_code=404, detail=f"도구 '{tool_name}'에 대한 엔드포인트가 정의되지 않았습니다")
+        
+        # FastAPI 서버의 해당 엔드포인트 호출
+        headers = {}
+        if request.authorization:
+            headers["Authorization"] = request.authorization
+        
+        if tool_name == "update_resume":
+            # PUT 요청으로 처리
+            result = await fastapi_client.put_api(
+                endpoint,
+                request.arguments.get("resume_data", {}),
+                headers=headers
+            )
+            return ToolCallResponse(content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(result, ensure_ascii=False)
+                }
+            ])
+        else:
+            # GET 요청으로 처리
+            result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)
+            return ToolCallResponse(content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(result, ensure_ascii=False)
+                }
+            ])
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"도구 호출 실패: {str(e)}")
 
