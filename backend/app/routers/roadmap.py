@@ -116,3 +116,24 @@ def delete_roadmap(
 
     db.delete(roadmap)
     db.commit()
+
+
+@router.get(
+    "/{roadmap_id}",
+    response_model=RoadmapResponse,
+    summary="특정 로드맵 상세 조회",
+    operation_id="get_roadmap_detail",
+    description="""
+특정 로드맵의 상세 정보를 조회합니다.
+
+- `roadmap_id`에 해당하는 로드맵이 존재하지 않으면 404 오류를 반환합니다.
+"""
+)
+def get_roadmap_detail(
+    roadmap_id: int,
+    db: Session = Depends(get_db)
+):
+    roadmap = db.query(Roadmap).filter(Roadmap.id == roadmap_id).first()
+    if not roadmap:
+        raise HTTPException(status_code=404, detail="로드맵을 찾을 수 없습니다.")
+    return roadmap
