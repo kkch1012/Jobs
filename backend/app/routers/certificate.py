@@ -3,82 +3,85 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.certificate import Certificate
 from app.schemas.certificate import CertificateCreate, CertificateResponse
-# from app.core.security import admin_only  # 주석 처리
-from app.core.security import get_current_user  # 추가 import 필요
+from app.utils.dependencies import get_current_user
+from app.utils.logger import app_logger
+from typing import List
 from app.models.user import User
 
 router = APIRouter(prefix="/certificates", tags=["certificates"])
 
-# 사용자용 자격증 전체 목록 조회 (선택 시 보여줄 용도)
 @router.get(
     "/",
-    response_model=list[CertificateResponse],
-    operation_id="list_all_certificates",
-    summary="전체 자격증 목록 조회",
-    description="""
-모든 사용자가 선택할 수 있는 자격증 목록을 조회합니다.
-
-- 이 목록은 관리자에 의해 미리 등록된 기준 자격증 리스트입니다.
-- 회원가입 또는 이력서 작성 시 사용자가 선택할 수 있도록 제공합니다.
-"""
+    response_model=List[CertificateResponse],
+    summary="전체 자격증 조회",
+    description="등록된 모든 자격증을 조회합니다."
 )
 def list_all_certificates(db: Session = Depends(get_db)):
-    return db.query(Certificate).all()
+    try:
+        certificates = db.query(Certificate).all()
+        app_logger.info(f"자격증 조회 완료: {len(certificates)}건")
+        return certificates
+    except Exception as e:
+        app_logger.error(f"자격증 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"자격증 조회 중 오류가 발생했습니다: {str(e)}")
 
-# 기준 자격증 등록 (관리자만 가능)
 @router.post(
     "/",
     response_model=CertificateResponse,
-    operation_id="create_certificate",
-    summary="자격증 등록 (관리자 전용)",
-    description="""
-기준 자격증을 등록합니다. (관리자 전용)
-
-- 자격증명과 발급기관을 입력받아 등록합니다.
-- 등록된 자격증은 사용자들이 선택 가능한 기준 자격증으로 사용됩니다.
-"""
+    summary="새로운 자격증 등록",
+    description="새로운 자격증을 등록합니다."
 )
 def create_certificate(
-    cert_data: CertificateCreate,
+    certificate: CertificateCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # admin_only → get_current_user로 변경
+    current_user: User = Depends(get_current_user)
 ):
-    # 관리자 권한 체크 예시 (User 모델에 is_admin 또는 role 필드가 있다고 가정)
-    # if not getattr(current_user, "is_admin", False):
-    #     raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    try:
+        # 중복 체크
+        existing_cert = db.query(Certificate).filter(
+            Certificate.name == certificate.name,
+            Certificate.issuer == certificate.issuer
+        ).first()
+        if existing_cert:
+            raise HTTPException(status_code=400, detail="이미 등록된 자격증입니다.")
+        
+        db_certificate = Certificate(**certificate.dict())
+        db.add(db_certificate)
+        db.commit()
+        db.refresh(db_certificate)
+        
+        app_logger.info(f"새로운 자격증 등록 완료: {db_certificate.name}")
+        return db_certificate
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"자격증 등록 실패: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"자격증 등록 중 오류가 발생했습니다: {str(e)}")
 
-    new_cert = Certificate(name=cert_data.name, issuer=cert_data.issuer)
-    db.add(new_cert)
-    db.commit()
-    db.refresh(new_cert)
-    return new_cert
-
-# 기준 자격증 삭제 (관리자만 가능)
 @router.delete(
-    "/{cert_id}",
-    status_code=204,
-    operation_id="delete_certificate",
-    summary="자격증 삭제 (관리자 전용)",
-    description="""
-기준 자격증을 삭제합니다. (관리자 전용)
-
-- `cert_id`는 삭제할 자격증의 고유 ID입니다.
-- 해당 자격증이 존재하지 않을 경우 404 에러를 반환합니다.
-- 삭제 시, 사용자와의 연결 기록은 유지되며 기준 리스트에서만 제거됩니다.
-"""
+    "/{certificate_id}",
+    summary="자격증 삭제",
+    description="기존 자격증을 삭제합니다."
 )
 def delete_certificate(
-    cert_id: int,
+    certificate_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)  # admin_only → get_current_user로 변경
+    current_user: User = Depends(get_current_user)
 ):
-    # 관리자 권한 체크 예시
-    # if not getattr(current_user, "is_admin", False):
-    #     raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
-    cert = db.query(Certificate).filter(Certificate.id == cert_id).first()
-    if not cert:
-        raise HTTPException(status_code=404, detail="자격증을 찾을 수 없습니다.")
-    db.delete(cert)
-    db.commit()
-    return Response(status_code=204)
+    try:
+        certificate = db.query(Certificate).filter(Certificate.id == certificate_id).first()
+        if not certificate:
+            raise HTTPException(status_code=404, detail="자격증을 찾을 수 없습니다.")
+        
+        db.delete(certificate)
+        db.commit()
+        
+        app_logger.info(f"자격증 삭제 완료: {certificate.name}")
+        return {"message": "자격증이 성공적으로 삭제되었습니다."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"자격증 삭제 실패: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"자격증 삭제 중 오류가 발생했습니다: {str(e)}")

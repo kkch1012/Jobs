@@ -156,6 +156,23 @@ AVAILABLE_TOOLS = {
                 "message": {"type": "string", "description": "수정 결과 메시지"}
             }
         }
+    ),
+    "job_recommendation": MCPTool(
+        name="job_recommendation",
+        description="사용자에게 맞춤형 채용공고를 추천합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "top_n": {"type": "integer", "description": "유사도 상위 N개에서 추천", "default": 20}
+            }
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "recommendation": {"type": "string", "description": "추천 결과 및 설명"},
+                "job_count": {"type": "integer", "description": "추천된 공고 수"}
+            }
+        }
     )
 }
 
@@ -259,7 +276,8 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "roadmaps": "/roadmaps/",
             "visualization": "/visualization/weekly_skill_frequency",
             "get_my_resume": "/users/me/resume",
-            "update_resume": "/users/me/resume"
+            "update_resume": "/users/me/resume",
+            "job_recommendation": "/recommend/jobs"
         }
         
         endpoint = endpoint_mapping.get(tool_name)

@@ -28,9 +28,3 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
-
-# 관리자 권한 체크 (현재 User 모델에 role 필드가 없으므로 주석 처리)
-# def admin_only(current_user: User = Depends(get_current_user)):
-#     if getattr(current_user, 'role', None) != "admin":
-#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="관리자 권한이 필요합니다.")
-#     return current_user

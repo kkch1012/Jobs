@@ -1,103 +1,125 @@
-import os
-import json
-import pandas as pd
 import numpy as np
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 from app.models.user import User
-from app.models.job_postings import JobPosting
+from app.models.job_post import JobPost
 from app.models.user_similarity import UserSimilarity
+from app.utils.logger import similarity_logger
 
-# Step 1. 환경 변수 로드
-load_dotenv()
-
-# Step 3. 유저 데이터 로드
-def load_user_data(user_id: int, engine) -> dict:
-    query = f"""
-    SELECT 
-        u.id, u.name, u.gender, u.university, u.major, u.education_status, u.degree,
-        u.language_score, u.desired_job,
-        ue.name AS experience_name, ue.period AS experience_period, ue.description AS experience_description,
-        s.name AS skill_name, us.proficiency AS skill_proficiency,
-        c.name AS certificate_name
-    FROM "Users" u
-    LEFT JOIN "UserExperience" ue ON u.experience_id = ue.id
-    LEFT JOIN "User_Skill" us ON u.id = us.user_id
-    LEFT JOIN "Skill" s ON us.skill_id = s.id
-    LEFT JOIN "User_Certificate" uc ON uc.user_id = u.id
-    LEFT JOIN "Certificate" c ON uc.certificate_id = c.id
-    WHERE u.id = {user_id}
-    """
-    df = pd.read_sql(query, engine)
-    user_base = df.iloc[0][[
-        "id", "name", "gender", "university", "major", "education_status",
-        "degree", "language_score", "desired_job"
-    ]].to_dict()
-    try:
-        user_base["language_score"] = json.loads(user_base["language_score"])
-    except:
-        user_base["language_score"] = {}
-
-    experience = {
-        "name": df.iloc[0]["experience_name"],
-        "period": df.iloc[0]["experience_period"],
-        "description": df.iloc[0]["experience_description"]
-    }
-
-    skills_df = df[["skill_name", "skill_proficiency"]].dropna().drop_duplicates()
-    skill_names = skills_df["skill_name"].tolist()
-    proficiencies = skills_df["skill_proficiency"].tolist()
-    certificates = df["certificate_name"].dropna().drop_duplicates().tolist()
-
-    return {
-        **user_base,
-        "experience": [experience],
-        "skill_id": skill_names,
-        "proficiency": proficiencies,
-        "certificate_id": certificates
-    }
-
-# Step 4. 공고 데이터 로드
-def load_job_data(engine):
-    query = "SELECT id, full_embedding FROM job_postings"
-    return pd.read_sql(query, engine)
-
-# Step 5. 유저 임베딩 생성
-embedder = SentenceTransformer("intfloat/multilingual-e5-large")
+# 임베딩 모델 싱글턴
+_embedder = None
+def get_embedder():
+    global _embedder
+    if _embedder is None:
+        _embedder = SentenceTransformer("intfloat/multilingual-e5-large")
+    return _embedder
 
 def summarize_user_for_embedding(user: User) -> str:
+    """사용자 정보를 임베딩용 텍스트로 요약"""
     # ORM 객체에서 정보 추출
-    skills = [f"{s.skill.name}({s.proficiency})" for s in user.skills]
-    certs = [c.certificate.name for c in user.certificates]
-    exp = user.experience
+    skills = [f"{s.skill.name}({s.proficiency})" for s in user.user_skills]
+    certs = [c.certificate.name for c in user.user_certificates]
+    exp = user.experiences[0] if user.experiences else None
     exp_text = f"{exp.name}, {exp.period}, {exp.description}" if exp else "없음"
+    
+    # language_score 처리
+    lang_score = '없음'
+    if getattr(user, 'language_score', None) is not None and isinstance(user.language_score, dict):
+        lang_score = user.language_score.get('OPIC', '없음')
+    
     return (
         f"이름: {user.name}\n"
         f"성별: {user.gender}, 학교: {user.university}, 학과: {user.major}, "
         f"학위: {user.degree}, 학력 상태: {user.education_status}\n"
         f"희망 직무: {user.desired_job}\n"
-        f"어학 점수: {user.language_score}\n"
+        f"어학 점수: {lang_score}\n"
         f"기술 스택: {', '.join(skills) or '없음'}\n"
         f"자격증: {', '.join(certs) or '없음'}\n"
         f"경험: {exp_text}"
     )
 
 def get_user_embedding(user: User) -> np.ndarray:
+    """사용자 정보를 임베딩 벡터로 변환"""
     user_text = summarize_user_for_embedding(user)
+    embedder = get_embedder()
     embedding = embedder.encode(user_text, normalize_embeddings=True)
     return np.array(embedding)
 
-def compute_similarity_scores(user: User, db: Session):
+def compute_similarity_scores(user: User, db: Session) -> list:
+    """사용자와 모든 채용공고 간의 유사도 점수 계산"""
     user_embedding = get_user_embedding(user)
-    jobs = db.query(JobPosting).all()
-    job_embeddings = np.vstack([np.array(j.full_embedding) for j in jobs])
+    jobs = db.query(JobPost).all()
+    
+    if not jobs:
+        return []
+    
+    # 유효한 임베딩을 가진 채용공고만 필터링
+    valid_jobs = []
+    valid_embeddings = []
+    
+    for job in jobs:
+        if hasattr(job, 'full_embedding') and job.full_embedding is not None:
+            try:
+                # 임베딩을 numpy 배열로 변환
+                job_embedding = np.array(job.full_embedding)
+                if job_embedding.size > 0:  # 빈 배열이 아닌지 확인
+                    valid_jobs.append(job)
+                    valid_embeddings.append(job_embedding)
+            except Exception as e:
+                similarity_logger.warning(f"Job {job.id} 임베딩 변환 실패: {e}")
+                continue
+    
+    if not valid_jobs:
+        similarity_logger.warning("유효한 임베딩을 가진 채용공고가 없습니다.")
+        return []
+    
+    # 디버깅 정보 출력
+    similarity_logger.info(f"사용자 임베딩 형태: {user_embedding.shape}")
+    similarity_logger.info(f"사용자 임베딩 범위: {user_embedding.min():.4f} ~ {user_embedding.max():.4f}")
+    similarity_logger.info(f"유효한 채용공고 수: {len(valid_jobs)}")
+    
+    # 첫 번째 채용공고 임베딩 정보 출력
+    if valid_embeddings:
+        first_job_emb = valid_embeddings[0]
+        similarity_logger.info(f"첫 번째 채용공고 임베딩 형태: {first_job_emb.shape}")
+        similarity_logger.info(f"첫 번째 채용공고 임베딩 범위: {first_job_emb.min():.4f} ~ {first_job_emb.max():.4f}")
+    
+    # 임베딩 스택 생성
+    job_embeddings = np.vstack(valid_embeddings)
+    
+    # 차원 확인
+    if user_embedding.shape[0] != job_embeddings.shape[1]:
+        similarity_logger.error(f"차원 불일치: 사용자 {user_embedding.shape[0]} vs 채용공고 {job_embeddings.shape[1]}")
+        return []
+    
+    # 코사인 유사도 계산
     similarity_scores = cosine_similarity([user_embedding], job_embeddings)[0]
-    return [(jobs[i].id, float(similarity_scores[i])) for i in range(len(jobs))]
+    
+    # 결과 확인
+    similarity_logger.info(f"유사도 점수 범위: {similarity_scores.min():.4f} ~ {similarity_scores.max():.4f}")
+    similarity_logger.info(f"유사도 점수 평균: {similarity_scores.mean():.4f}")
+    
+    return [(valid_jobs[i].id, float(similarity_scores[i])) for i in range(len(valid_jobs))]
 
-def save_similarity_scores(user: User, scores, db: Session):
+def save_similarity_scores(user: User, scores: list, db: Session):
+    """계산된 유사도 점수를 데이터베이스에 저장"""
+    # 기존 유사도 점수 삭제
+    db.query(UserSimilarity).filter(UserSimilarity.user_id == user.id).delete()
+    
+    # 새로운 유사도 점수 저장
     for job_id, sim in scores:
         db.add(UserSimilarity(user_id=user.id, job_post_id=job_id, similarity=sim))
+    
     db.commit()
+
+def get_user_similarity_scores(user_id: int, db: Session, limit: int = 20) -> list:
+    """사용자의 유사도 점수를 높은 순으로 조회"""
+    similarities = (
+        db.query(UserSimilarity)
+        .filter(UserSimilarity.user_id == user_id)
+        .order_by(UserSimilarity.similarity.desc())
+        .limit(limit)
+        .all()
+    )
+    return similarities

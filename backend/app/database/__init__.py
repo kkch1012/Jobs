@@ -8,5 +8,5 @@ def get_db():
     finally:
         db.close()
 
-# SQLAlchemy Base에 모델들을 등록하기 위한 전체 임포트
-from app import models
+# 모델들을 등록하기 위한 import (순환 import 방지)
+# 각 모델 파일에서 Base를 import하여 자동으로 등록됨

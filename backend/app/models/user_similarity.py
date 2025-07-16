@@ -1,4 +1,4 @@
-from sqlalchemy import VARCHAR, Column, Integer, ForeignKey
+from sqlalchemy import Float, Column, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
 
@@ -8,7 +8,7 @@ class UserSimilarity(Base):
     id = Column(Integer, primary_key=True, index=True)  # 유저유사도ID
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     job_post_id = Column(Integer, ForeignKey("job_posts.id", ondelete="CASCADE"), nullable=False)
-    similarity = Column(VARCHAR, nullable=False)  # 유사도,적합도 (예: 56)
+    similarity = Column(Float, nullable=False)  # 유사도,적합도 (예: 0.856)
 
 UserSimilarity.job_post = relationship("JobPost", back_populates="user_similarities")
 UserSimilarity.user = relationship("User", back_populates="user_similarities")

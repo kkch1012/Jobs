@@ -1,92 +1,86 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
-
 from app.database import get_db
 from app.models.skill import Skill
 from app.schemas.skill import SkillCreate, SkillResponse
-from app.core.security import get_current_user
+from app.utils.dependencies import get_current_user
+from app.utils.logger import app_logger
+from typing import List
 from app.models.user import User
 
-router = APIRouter(prefix="/skills", tags=["Skills"])
+router = APIRouter(prefix="/skills", tags=["skills"])
 
 @router.get(
     "/",
-    response_model=list[SkillResponse],
-    operation_id="list_skills",
-    summary="전체 기술 목록 조회",
-    description="""
-기술 DB에 등록된 전체 기술 목록을 조회합니다.
-
-- 이 목록은 모든 사용자가 공통으로 사용할 수 있는 기술 목록입니다.
-- 사용자 또는 관리자가 사용할 수 있으며 인증이 필요합니다.
-"""
+    response_model=List[SkillResponse],
+    summary="전체 기술 스택 조회",
+    description="등록된 모든 기술 스택을 조회합니다."
 )
-def list_skills(
+def list_all_skills(
     db: Session = Depends(get_db)
 ):
-    skills = db.query(Skill).all()
-    return skills
+    try:
+        skills = db.query(Skill).all()
+        app_logger.info(f"기술 스택 조회 완료: {len(skills)}건")
+        return skills
+    except Exception as e:
+        app_logger.error(f"기술 스택 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"기술 스택 조회 중 오류가 발생했습니다: {str(e)}")
 
-
-# 기술 항목 추가 (관리자만 가능)
 @router.post(
     "/",
     response_model=SkillResponse,
-    operation_id="add_skill",
-    summary="기술 항목 추가(관리자)",
-    description="""
-기술 마스터 DB에 새로운 기술 항목을 추가합니다.
-
-- 이 API는 인증된 사용자(예: 관리자)가 기술 목록을 등록할 때 사용됩니다.
-- 입력받은 기술명은 `Skill` 테이블에 저장됩니다.
-"""
+    summary="새로운 기술 스택 등록",
+    description="새로운 기술 스택을 등록합니다."
 )
-def add_skill(
-    skill_data: SkillCreate,
+def create_skill(
+    skill: SkillCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 관리자 권한 체크 예시 (User 모델에 is_admin 필드 있다고 가정)
-    #if not getattr(current_user, "is_admin", False):
-    #    raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
+    try:
+        # 중복 체크
+        existing_skill = db.query(Skill).filter(Skill.name == skill.name).first()
+        if existing_skill:
+            raise HTTPException(status_code=400, detail="이미 등록된 기술명입니다.")
+        
+        db_skill = Skill(**skill.dict())
+        db.add(db_skill)
+        db.commit()
+        db.refresh(db_skill)
+        
+        app_logger.info(f"새로운 기술 스택 등록 완료: {db_skill.name}")
+        return db_skill
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"기술 스택 등록 실패: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"기술 스택 등록 중 오류가 발생했습니다: {str(e)}")
 
-    # 중복 기술명 확인
-    existing_skill = db.query(Skill).filter(Skill.name == skill_data.name).first()
-    if existing_skill:
-        raise HTTPException(status_code=400, detail="이미 등록된 기술명입니다.")
-
-    new_skill = Skill(name=skill_data.name)
-    db.add(new_skill)
-    db.commit()
-    db.refresh(new_skill)
-    return new_skill
-
-# 기술 항목 삭제 (관리자만 가능)
 @router.delete(
     "/{skill_id}",
-    status_code=204,
-    operation_id="delete_skill",
-    summary="기술 항목 삭제(관리자)",
-    description="""
-기술 마스터 DB에서 특정 기술 항목을 삭제합니다.
-
-- `skill_id`는 삭제할 기술의 고유 ID입니다.
-- 관리자만 삭제할 수 있습니다.
-"""
+    summary="기술 스택 삭제",
+    description="기존 기술 스택을 삭제합니다."
 )
 def delete_skill(
     skill_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 관리자 권한 체크
-    #if not getattr(current_user, "is_admin", False):
-    #   raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
-
-    skill = db.query(Skill).filter(Skill.id == skill_id).first()
-    if not skill:
-        raise HTTPException(status_code=404, detail="해당 기술 항목을 찾을 수 없습니다.")
-
-    db.delete(skill)
-    db.commit()
-    return Response(status_code=204)
+    try:
+        skill = db.query(Skill).filter(Skill.id == skill_id).first()
+        if not skill:
+            raise HTTPException(status_code=404, detail="해당 기술 항목을 찾을 수 없습니다.")
+        
+        db.delete(skill)
+        db.commit()
+        
+        app_logger.info(f"기술 스택 삭제 완료: {skill.name}")
+        return {"message": "기술 스택이 성공적으로 삭제되었습니다."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"기술 스택 삭제 실패: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"기술 스택 삭제 중 오류가 발생했습니다: {str(e)}")

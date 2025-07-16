@@ -51,13 +51,18 @@ API_INTENT_PARAMETERS = {
             "job_name": None,
             "field": "tech_stack"
         }
+    },
+    "job_recommendation": {
+        "parameters": {
+            "top_n": 20
+        }
     }
 }
 
 # intent 목록만 단순 리스트로 유지
 INTENT_LIST = [
     "job_posts", "certificates", "skills", "roadmaps", "visualization",
-    "get_my_resume", "update_resume", "page_move", "general"
+    "get_my_resume", "update_resume", "page_move", "job_recommendation", "general"
 ]
 
 def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, Any]:
@@ -100,6 +105,12 @@ def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, An
             parameters["employment_type"] = "계약직"
         elif any(word in message_lower for word in ["인턴", "인턴십"]):
             parameters["employment_type"] = "인턴"
+    elif api_type == "job_recommendation":
+        # 추천 관련 파라미터 추출
+        if any(word in message_lower for word in ["많이", "더", "더 많은"]):
+            parameters["top_n"] = 50
+        elif any(word in message_lower for word in ["적게", "몇 개", "3개", "5개"]):
+            parameters["top_n"] = 10
     elif api_type == "visualization":
         job_patterns = [
             r"([가-힣a-zA-Z]+(?:개발자|엔지니어|디자이너|마케터|기획자))",
@@ -149,7 +160,7 @@ async def chat_with_llm(
 
     # 2. 도구 호출이 필요한 intent면 MCP 서버 도구 호출
     mcp_result = None
-    if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization"]:
+    if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization", "job_recommendation"]:
         # 파라미터 보완: 메시지에서 추가 추출
         extracted = extract_parameters_from_message(data.message, intent)
         parameters = {**extracted, **parameters}
