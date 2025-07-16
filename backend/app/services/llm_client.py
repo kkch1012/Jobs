@@ -53,44 +53,107 @@ class OpenRouterClient:
             return None
 
     async def analyze_intent(self, user_message: str, available_apis: List[str]) -> Dict[str, Any]:
-        """사용자 메시지의 의도를 LLM을 사용하여 분석합니다."""
+        """사용자 메시지의 의도를 LLM을 사용하여 분석하고 파라미터를 추출합니다."""
+        
+        # API별 파라미터 정보 정의
+        api_parameters = {
+            "job_posts": {
+                "description": "채용공고 검색",
+                "parameters": {
+                    "company_name": "회사명 (예: 삼성, 네이버, 카카오)",
+                    "job_name": "직무명 (예: 프론트엔드 개발자, 백엔드 엔지니어, 데이터 사이언티스트)",
+                    "applicant_type": "지원자격 (신입/경력)",
+                    "employment_type": "고용형태 (정규직/계약직/인턴)",
+                    "tech_stack": "기술스택 (예: Python, React, Java, AWS)",
+                    "limit": "검색 결과 개수 (기본값: 10)"
+                }
+            },
+            "certificates": {
+                "description": "자격증 정보 검색",
+                "parameters": {
+                    "limit": "검색 결과 개수 (기본값: 10)"
+                }
+            },
+            "skills": {
+                "description": "기술스택 정보 검색",
+                "parameters": {
+                    "limit": "검색 결과 개수 (기본값: 10)"
+                }
+            },
+            "roadmaps": {
+                "description": "학습 로드맵 검색",
+                "parameters": {
+                    "limit": "검색 결과 개수 (기본값: 10)"
+                }
+            },
+            "visualization": {
+                "description": "데이터 시각화",
+                "parameters": {
+                    "job_name": "직무명 (예: 프론트엔드 개발자)",
+                    "field": "분석 필드 (tech_stack/qualifications, 기본값: tech_stack)"
+                }
+            },
+            "job_recommendation": {
+                "description": "맞춤형 직무 추천",
+                "parameters": {
+                    "top_n": "추천 개수 (기본값: 20)"
+                }
+            }
+        }
+        
         system_prompt = f"""
-당신은 사용자의 메시지를 분석하여 적절한 API를 선택하고, 관련 파라미터(회사명, 직무명, 기술스택 등)를 최대한 많이 추출하는 AI 어시스턴트입니다.
+당신은 사용자의 메시지를 분석하여 적절한 API를 선택하고, 관련 파라미터를 정확히 추출하는 AI 어시스턴트입니다.
 
-- 사용 가능한 API 목록:
+**사용 가능한 API 목록:**
 {json.dumps(available_apis, ensure_ascii=False, indent=2)}
 
-**중요한 Intent 분류 규칙:**
-1. **이력서 관련 질문**은 반드시 해당 intent로 분류:
-   - "내 이력서", "이력서 보여줘", "내 정보", "내 대학교", "내 학력", "내 경력" → `get_my_resume`
-   - "이력서 수정", "이력서 업데이트", "이력서 추가" → `update_resume`
+**API별 파라미터 정보:**
+{json.dumps(api_parameters, ensure_ascii=False, indent=2)}
 
-2. **채용공고 관련 질문**:
-   - "채용공고", "구인", "일자리", "회사" → `job_posts`
-   - "기술", "스킬", "기술스택" → `skills`
-   - "자격증", "증명서" → `certificates`
-   - "로드맵", "학습경로" → `roadmaps`
+**중요한 파라미터 추출 규칙:**
+1. **직무명 추출**: 
+   - "프론트엔드 개발자", "백엔드 엔지니어", "데이터 사이언티스트", "PM", "UI/UX 디자이너" 등
+   - 구체적이고 정확한 직무명을 추출하세요
 
-3. **시각화 관련 질문**:
-   - "분석", "통계", "차트", "그래프" → `visualization`
+2. **기술스택 추출**:
+   - "Python", "React", "Java", "AWS", "Docker", "Kubernetes" 등
+   - 여러 기술이 있으면 콤마로 구분하여 하나의 문자열로 만드세요
 
-- 각 intent에 대해 추출 가능한 모든 파라미터(예: company_name, job_name, applicant_type, employment_type, tech_stack 등)를 최대한 많이 추출하세요.
-- 파라미터는 null로 두지 말고, 메시지에서 추출 가능한 값이 하나라도 있으면 반드시 포함하세요.
-- 하나의 조건만 있어도 검색이 가능하니, 일부 파라미터만 추출되어도 모두 포함하세요.
-- 반드시 코드블록(예: ```json ... ```) 없이, 순수한 JSON만 반환하세요.
+3. **회사명 추출**:
+   - "삼성", "네이버", "카카오", "구글", "마이크로소프트" 등
+   - "에서", "의" 등의 조사를 제거하세요
 
-**예시:**
-  {{"intent": "get_my_resume", "confidence": 0.95, "parameters": {{}}, "reasoning": "사용자가 '내 대학교 조회해줘'라고 요청했으므로, 이력서 조회 intent로 분류함."}}
-  {{"intent": "get_my_resume", "confidence": 0.9, "parameters": {{}}, "reasoning": "사용자가 '내 이력서 보여줘'라고 요청했으므로, 이력서 조회 intent로 분류함."}}
-  {{"intent": "job_posts", "confidence": 0.85, "parameters": {{"company_name": "더스윙"}}, "reasoning": "사용자가 '더스윙 채용공고 조회해줘'라고 요청했으므로, 회사명을 추출함."}}
+4. **지원자격/고용형태**:
+   - 신입/경력, 정규직/계약직/인턴 등
 
-다음 JSON 형식으로 응답하세요:
+5. **숫자 파라미터**:
+   - "많이", "더 많은" → 더 큰 숫자
+   - "적게", "몇 개" → 더 작은 숫자
+
+**Intent 분류 규칙:**
+- 이력서 관련: "내 이력서", "이력서 보여줘" → `get_my_resume`
+- 이력서 수정: "이력서 수정", "이력서 업데이트" → `update_resume`
+- 채용공고: "채용공고", "구인", "일자리" → `job_posts`
+- 자격증: "자격증", "증명서" → `certificates`
+- 기술: "기술", "스킬" → `skills`
+- 로드맵: "로드맵", "학습경로" → `roadmaps`
+- 시각화: "분석", "통계", "차트" → `visualization`
+- 추천: "추천", "맞춤" → `job_recommendation`
+
+**응답 형식:**
 {{
     "intent": "API 이름 또는 'general'",
     "confidence": 0.0-1.0,
-    "parameters": {{}},
+    "parameters": {{
+        "파라미터명": "추출된 값"
+    }},
     "reasoning": "분석 근거"
 }}
+
+**예시:**
+- "프론트엔드 개발자 채용공고 찾아줘" → {{"intent": "job_posts", "parameters": {{"job_name": "프론트엔드 개발자"}}}}
+- "Python, React 사용하는 백엔드 개발자 구인" → {{"intent": "job_posts", "parameters": {{"job_name": "백엔드 개발자", "tech_stack": "Python, React"}}}}
+- "네이버에서 신입 개발자 채용" → {{"intent": "job_posts", "parameters": {{"company_name": "네이버", "applicant_type": "신입", "job_name": "개발자"}}}}
 """
 
         messages: List[ChatCompletionMessageParam] = [

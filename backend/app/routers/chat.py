@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/mcp_chat", tags=["mcp_chat"])
 
-# intent별 파라미터 추출 정보만 남김
+# intent별 파라미터 추출 정보 (기본값만 정의)
 API_INTENT_PARAMETERS = {
     "job_posts": {
         "parameters": {
@@ -59,18 +59,30 @@ API_INTENT_PARAMETERS = {
     }
 }
 
-# intent 목록만 단순 리스트로 유지
+# intent 목록
 INTENT_LIST = [
     "job_posts", "certificates", "skills", "roadmaps", "visualization",
     "get_my_resume", "update_resume", "page_move", "job_recommendation", "general"
 ]
 
+def merge_parameters_with_defaults(extracted_params: Dict[str, Any], api_type: str) -> Dict[str, Any]:
+    """추출된 파라미터와 기본값을 병합합니다."""
+    default_params = API_INTENT_PARAMETERS[api_type]["parameters"].copy()
+    
+    # 추출된 파라미터로 기본값 덮어쓰기
+    for key, value in extracted_params.items():
+        if value is not None and key in default_params:
+            default_params[key] = value
+    
+    return default_params
+
 def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, Any]:
-    """사용자 메시지에서 API 파라미터를 추출합니다."""
+    """사용자 메시지에서 API 파라미터를 추출합니다. (백업용 - LLM 추출 실패시 사용)"""
     message_lower = message.lower()
-    parameters = API_INTENT_PARAMETERS[api_type]["parameters"].copy()
-    # (기존 파라미터 추출 로직은 필요시 유지)
+    parameters = {}
+    
     if api_type == "job_posts":
+        # 회사명 추출
         company_patterns = [
             r"([가-힣a-zA-Z]+(?:기업|회사|corporation|company|inc|ltd))",
             r"([가-힣a-zA-Z]+에서)",
@@ -81,53 +93,69 @@ def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, An
             if match:
                 parameters["company_name"] = match.group(1).replace("에서", "").replace("의", "")
                 break
-        job_patterns = [
-            r"([가-힣a-zA-Z]+(?:개발자|엔지니어|디자이너|마케터|기획자))",
-            r"([가-힣a-zA-Z]+(?:developer|engineer|designer|marketer))"
-        ]
-        for pattern in job_patterns:
-            match = re.search(pattern, message)
-            if match:
-                parameters["job_name"] = match.group(1)
-                break
-        tech_keywords = ["Python", "Java", "JavaScript", "React", "Vue", "Node.js", "Django", "Spring"]
-        for tech in tech_keywords:
-            if tech.lower() in message_lower:
-                parameters["tech_stack"] = tech
-                break
-        if any(word in message_lower for word in ["신입", "신규", "주니어"]):
+        
+        # 지원자격 추출
+        if any(word in message_lower for word in ["신입", "신규", "주니어", "junior"]):
             parameters["applicant_type"] = "신입"
-        elif any(word in message_lower for word in ["경력", "시니어", "전문가"]):
+        elif any(word in message_lower for word in ["경력", "시니어", "전문가", "senior"]):
             parameters["applicant_type"] = "경력"
-        if any(word in message_lower for word in ["정규직", "정규"]):
+        
+        # 고용형태 추출
+        if any(word in message_lower for word in ["정규직", "정규", "permanent"]):
             parameters["employment_type"] = "정규직"
-        elif any(word in message_lower for word in ["계약직", "계약"]):
+        elif any(word in message_lower for word in ["계약직", "계약", "contract"]):
             parameters["employment_type"] = "계약직"
-        elif any(word in message_lower for word in ["인턴", "인턴십"]):
+        elif any(word in message_lower for word in ["인턴", "인턴십", "intern"]):
             parameters["employment_type"] = "인턴"
+            
     elif api_type == "job_recommendation":
-        # 추천 관련 파라미터 추출
+        # 추천 개수 조정
         if any(word in message_lower for word in ["많이", "더", "더 많은"]):
             parameters["top_n"] = 50
         elif any(word in message_lower for word in ["적게", "몇 개", "3개", "5개"]):
             parameters["top_n"] = 10
+            
     elif api_type == "visualization":
-        job_patterns = [
-            r"([가-힣a-zA-Z]+(?:개발자|엔지니어|디자이너|마케터|기획자))",
-            r"([가-힣a-zA-Z]+(?:developer|engineer|designer|marketer))"
-        ]
-        for pattern in job_patterns:
-            match = re.search(pattern, message)
-            if match:
-                parameters["job_name"] = match.group(1)
-                break
+        # 분석 필드 추출
         if any(word in message_lower for word in ["기술", "스택", "tech"]):
             parameters["field"] = "tech_stack"
         elif any(word in message_lower for word in ["자격", "qualification"]):
             parameters["field"] = "qualifications"
+    
     return parameters
 
-# 이하 LLM 기반 의도 분석/응답 생성 코드만 유지 (기존 키워드 기반 함수/변수/주석/legacy 코드 완전 삭제)
+async def save_message_to_mongo(session_id: int, role: str, content: str):
+    """MongoDB에 메시지를 저장합니다."""
+    msg = MCPMessage(
+        session_id=session_id,
+        role=role,
+        content=content,
+        created_at=datetime.utcnow()
+    )
+    await msg.insert()
+
+async def generate_llm_summary(intent: str, mcp_result: Dict[str, Any], model: str) -> str:
+    """LLM을 사용하여 MCP 결과를 자연어로 요약합니다."""
+    summary_prompt = f"""
+아래는 사용자의 요청 intent와 MCP 서버에서 받아온 원본 데이터입니다.
+- intent: {intent}
+- 원본 데이터: {json.dumps(mcp_result, ensure_ascii=False)}
+
+사용자에게 친절하고 명확하게 요약/설명/추천을 자연어로 생성하세요.
+"""
+    messages: List[ChatCompletionMessageParam] = [
+        {"role": "system", "content": "당신은 취업/직무 관련 정보를 요약/설명/추천하는 AI 어시스턴트입니다. 한국어로 자연스럽게 답변하세요."},
+        {"role": "user", "content": summary_prompt}
+    ]
+    llm_summary = await llm_client.chat_completion(messages, model=model)
+    return (llm_summary or "요약 생성 실패").strip()
+
+def create_error_response(session_id: int, error_content: str, status_code: int = 500, action: Optional[str] = None) -> JSONResponse:
+    """에러 응답을 생성합니다."""
+    response_content = {"error": error_content}
+    if action:
+        response_content["action"] = action
+    return JSONResponse(status_code=status_code, content=response_content)
 
 @router.post("/llm/chat/", summary="LLM+MCP 기반 AI 챗봇 대화 (의도 분석+도구 호출+자연어 요약)",
              description="""
@@ -143,149 +171,90 @@ async def chat_with_llm(
     db: Session = Depends(get_db),
     model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
 ):
-    # 0. Save user message to MongoDB
-    user_msg = MCPMessage(
-        session_id=data.session_id,
-        role="user",
-        content=data.message,
-        created_at=datetime.utcnow()
-    )
-    await user_msg.insert()
+    try:
+        # 0. 사용자 메시지 저장
+        await save_message_to_mongo(data.session_id, "user", data.message)
 
-    # 1. LLM으로 intent 분석
-    available_intents = INTENT_LIST
-    intent_json = await llm_client.analyze_intent(data.message, available_intents)
-    intent = intent_json.get("intent", "general")
-    parameters = intent_json.get("parameters", {})
+        # 1. LLM으로 intent 분석
+        intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
+        intent = intent_json.get("intent", "general")
+        parameters = intent_json.get("parameters", {})
 
-    # 2. 도구 호출이 필요한 intent면 MCP 서버 도구 호출
-    mcp_result = None
-    if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization", "job_recommendation"]:
-        # 파라미터 보완: 메시지에서 추가 추출
-        extracted = extract_parameters_from_message(data.message, intent)
-        parameters = {**extracted, **parameters}
-        try:
-            mcp_result = await mcp_client.call_tool(intent, parameters)
-        except Exception as e:
-            # Save error response as assistant message
-            error_content = f"MCP 도구 호출 실패: {str(e)}"
-            assistant_msg = MCPMessage(
-                session_id=data.session_id,
-                role="assistant",
-                content=error_content,
-                created_at=datetime.utcnow()
-            )
-            await assistant_msg.insert()
-            return JSONResponse(status_code=500, content={"error": error_content})
+        # 2. 도구 호출이 필요한 intent 처리
+        mcp_result = None
+        if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization", "job_recommendation"]:
+            # LLM이 추출한 파라미터를 기본값과 병합
+            parameters = merge_parameters_with_defaults(parameters, intent)
+            
+            try:
+                mcp_result = await mcp_client.call_tool(intent, parameters)
+            except Exception as e:
+                error_content = f"MCP 도구 호출 실패: {str(e)}"
+                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                return create_error_response(data.session_id, error_content)
 
-    # 3. LLM에 MCP 결과를 프롬프트로 넣어 자연어 응답 생성
-    if mcp_result is not None:
-        summary_prompt = f"""
-아래는 사용자의 요청 intent와 MCP 서버에서 받아온 원본 데이터입니다.
-- intent: {intent}
-- 원본 데이터: {json.dumps(mcp_result, ensure_ascii=False)}
-
-사용자에게 친절하고 명확하게 요약/설명/추천을 자연어로 생성하세요.
-"""
-        summary_messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": "당신은 취업/직무 관련 정보를 요약/설명/추천하는 AI 어시스턴트입니다. 한국어로 자연스럽게 답변하세요."},
-            {"role": "user", "content": summary_prompt}
-        ]
-        llm_summary = await llm_client.chat_completion(summary_messages, model=model)
-        answer = (llm_summary or "요약 생성 실패").strip()
-        # Save assistant message
-        assistant_msg = MCPMessage(
-            session_id=data.session_id,
-            role="assistant",
-            content=answer,
-            created_at=datetime.utcnow()
-        )
-        await assistant_msg.insert()
-        return {"answer": answer, "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
-
-    # 4. 이력서 관련 intent 처리
-    if intent in ["get_my_resume", "update_resume"]:
-        if not current_user:
-            error_content = "로그인이 필요합니다."
-            assistant_msg = MCPMessage(
-                session_id=data.session_id,
-                role="assistant",
-                content=error_content,
-                created_at=datetime.utcnow()
-            )
-            await assistant_msg.insert()
-            return JSONResponse(status_code=401, content={"error": error_content, "action": "login"})
-        
-        # MCP 서버 호출 시 인증 토큰 전달
-        try:
-            # Request에서 Authorization 헤더 추출
+        # 3. 이력서 관련 intent 처리
+        elif intent in ["get_my_resume", "update_resume"]:
+            if not current_user:
+                error_content = "로그인이 필요합니다."
+                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                return create_error_response(data.session_id, error_content, 401, "login")
+            
+            # 인증 토큰 추출
             auth_header = request.headers.get("authorization")
             if not auth_header:
                 error_content = "인증 토큰이 필요합니다."
-                assistant_msg = MCPMessage(
-                    session_id=data.session_id,
-                    role="assistant",
-                    content=error_content,
-                    created_at=datetime.utcnow()
-                )
-                await assistant_msg.insert()
-                return JSONResponse(status_code=401, content={"error": error_content})
+                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                return create_error_response(data.session_id, error_content, 401)
             
-            mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
-        except Exception as e:
-            error_content = f"이력서 도구 호출 실패: {str(e)}"
-            assistant_msg = MCPMessage(
-                session_id=data.session_id,
-                role="assistant",
-                content=error_content,
-                created_at=datetime.utcnow()
-            )
-            await assistant_msg.insert()
-            return JSONResponse(status_code=500, content={"error": error_content})
+            try:
+                # auth_header는 위에서 None 체크를 했으므로 str 타입임이 보장됨
+                mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
+            except Exception as e:
+                error_content = f"이력서 도구 호출 실패: {str(e)}"
+                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                return create_error_response(data.session_id, error_content)
 
-        # LLM 요약/설명
-        summary_prompt = f"""
-아래는 사용자의 요청 intent와 MCP 서버에서 받아온 원본 데이터입니다.
-- intent: {intent}
-- 원본 데이터: {json.dumps(mcp_result, ensure_ascii=False)}
+        # 4. 응답 생성
+        if mcp_result is not None:
+            # MCP 결과가 있는 경우 LLM 요약
+            answer = await generate_llm_summary(intent, mcp_result, model)
+        else:
+            # 일반 대화
+            answer = await llm_client.generate_response(data.message)
+            answer = (answer or "응답 생성 실패").strip()
 
-사용자에게 친절하고 명확하게 요약/설명/추천을 자연어로 생성하세요.
-"""
-        resume_messages: list[ChatCompletionMessageParam] = [
-            {"role": "system", "content": "당신은 취업/직무 관련 정보를 요약/설명/추천하는 AI 어시스턴트입니다. 한국어로 자연스럽게 답변하세요."},
-            {"role": "user", "content": summary_prompt}
-        ]
-        llm_summary = await llm_client.chat_completion(resume_messages, model=model)
-        answer = (llm_summary or "요약 생성 실패").strip()
-        assistant_msg = MCPMessage(
-            session_id=data.session_id,
-            role="assistant",
-            content=answer,
-            created_at=datetime.utcnow()
-        )
-        await assistant_msg.insert()
-        return {"answer": answer, "mcp_result": mcp_result, "intent": intent, "parameters": parameters}
+        # 5. 어시스턴트 메시지 저장
+        await save_message_to_mongo(data.session_id, "assistant", answer)
 
-    # 5. 일반 대화
-    general_answer = await llm_client.generate_response(data.message)
-    answer = (general_answer or "응답 생성 실패").strip()
-    assistant_msg = MCPMessage(
-        session_id=data.session_id,
-        role="assistant",
-        content=answer,
-        created_at=datetime.utcnow()
-    )
-    await assistant_msg.insert()
-    return {"answer": answer, "intent": intent, "parameters": parameters}
+        # 6. 응답 반환
+        response = {
+            "answer": answer,
+            "intent": intent,
+            "parameters": parameters
+        }
+        
+        if mcp_result is not None:
+            response["mcp_result"] = mcp_result
+            
+        return response
+
+    except Exception as e:
+        error_content = f"채팅 처리 중 오류가 발생했습니다: {str(e)}"
+        await save_message_to_mongo(data.session_id, "assistant", error_content)
+        return create_error_response(data.session_id, error_content)
 
 @router.get("/history", summary="세션별 채팅 이력 조회", description="특정 세션 ID의 모든 채팅 메시지(유저/AI)를 시간순으로 반환합니다.")
 async def get_chat_history(session_id: int):
-    messages = await MCPMessage.find({"session_id": session_id}).sort("created_at").to_list()
-    return [
-        {
-            "role": msg.role,
-            "content": msg.content,
-            "created_at": msg.created_at
-        }
-        for msg in messages
-    ]
+    try:
+        messages = await MCPMessage.find({"session_id": session_id}).sort("created_at").to_list()
+        return [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "created_at": msg.created_at
+            }
+            for msg in messages
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"채팅 이력 조회 실패: {str(e)}")

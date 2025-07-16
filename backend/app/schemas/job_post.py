@@ -20,7 +20,6 @@ class JobPostResponse(BaseModel):
     required_skills: Optional[List[Any]] = None
     preferred_skills: Optional[List[Any]] = None
     main_tasks_skills: Optional[List[Any]] = None
-    full_embedding: Optional[List[float]] = None
     created_at: datetime
     similarity: Optional[float] = None
 
