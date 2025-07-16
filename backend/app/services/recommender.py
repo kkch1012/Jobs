@@ -60,7 +60,7 @@ def call_qwen_api(prompt: str, api_key: str) -> str | None:
         "X-Title": "Job Recommender"
     }
     body = {
-        "model": "qwen/qwen-turbo:free",
+        "model": "qwen/qwen3-4b:free",
         "messages": [
             {"role": "system", "content": "너는 한국 채용 시장에 대해 잘 아는 최고의 채용 공고 추천 전문가야. 사용자에게 친근하고 명확한 어조로 설명해줘."},
             {"role": "user", "content": prompt}
@@ -70,16 +70,32 @@ def call_qwen_api(prompt: str, api_key: str) -> str | None:
     }
 
     try:
+        recommender_logger.info(f"OpenRouter API 호출 시작: {url}")
+        recommender_logger.info(f"API 키 확인: {api_key[:10]}...")
+        
         response = requests.post(url, headers=headers, json=body, timeout=60)
+        
+        recommender_logger.info(f"API 응답 상태 코드: {response.status_code}")
+        
+        if response.status_code != 200:
+            recommender_logger.error(f"API 응답 오류: {response.status_code} - {response.text}")
+            return None
+            
         response.raise_for_status()
         
         response_json = response.json()
+        recommender_logger.info(f"API 응답 구조: {list(response_json.keys())}")
         
         choice = response_json.get("choices", [{}])[0]
         message = choice.get("message", {})
         content = message.get("content", "")
 
-        return content if content else None
+        if content:
+            recommender_logger.info("API 응답에서 content 추출 성공")
+            return content
+        else:
+            recommender_logger.error("API 응답에서 content가 비어있음")
+            return None
 
     except requests.exceptions.RequestException as e:
         recommender_logger.error(f"API 요청 실패: 네트워크 또는 서버 오류. Error: {e}")

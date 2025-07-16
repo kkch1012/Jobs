@@ -47,7 +47,7 @@ def get_user_embedding(user: User) -> np.ndarray:
     """사용자 정보를 임베딩 벡터로 변환"""
     user_text = summarize_user_for_embedding(user)
     embedder = get_embedder()
-    embedding = embedder.encode(user_text, normalize_embeddings=True)
+    embedding = embedder.encode(user_text)
     return np.array(embedding)
 
 def compute_similarity_scores(user: User, db: Session) -> list:

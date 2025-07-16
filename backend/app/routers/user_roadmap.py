@@ -28,19 +28,46 @@ def create_user_roadmap(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # 중복 체크
-    existing = db.query(UserRoadmap).filter_by(
-        user_id=current_user.id,
-        roadmaps_id=roadmap_data.roadmaps_id
-    ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="이미 등록된 로드맵입니다.")
+    try:
+        # 중복 체크
+        existing = db.query(UserRoadmap).filter_by(
+            user_id=current_user.id,
+            roadmaps_id=roadmap_data.roadmaps_id
+        ).first()
+        
+        if existing:
+            print(f"중복 찜 시도: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 이미 찜했습니다.")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"이미 찜한 로드맵입니다. (로드맵 ID: {roadmap_data.roadmaps_id})"
+            )
 
-    new_roadmap = UserRoadmap(user_id=current_user.id, roadmaps_id=roadmap_data.roadmaps_id)
-    db.add(new_roadmap)
-    db.commit()
-    db.refresh(new_roadmap)
-    return new_roadmap
+        # 로드맵 존재 여부 확인
+        from app.models.roadmap import Roadmap
+        roadmap = db.query(Roadmap).filter(Roadmap.id == roadmap_data.roadmaps_id).first()
+        if not roadmap:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"존재하지 않는 로드맵입니다. (로드맵 ID: {roadmap_data.roadmaps_id})"
+            )
+
+        new_roadmap = UserRoadmap(user_id=current_user.id, roadmaps_id=roadmap_data.roadmaps_id)
+        db.add(new_roadmap)
+        db.commit()
+        db.refresh(new_roadmap)
+        
+        print(f"로드맵 찜 성공: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 찜했습니다.")
+        return new_roadmap
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"로드맵 찜 중 오류 발생: {str(e)}")
+        db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail="로드맵 찜 중 서버 오류가 발생했습니다."
+        )
 
 # 내 찜한 로드맵 목록
 @router.get(
