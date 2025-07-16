@@ -22,9 +22,13 @@ async def analyze_user_resume(user: User, db: Session) -> Optional[Dict[str, Any
         resume_data = await mcp_client.call_tool("get_my_resume", {})
         
         # 사용자 정보 요약
+        # desired_job을 JSON 배열로 처리
+        desired_jobs = user.desired_job if isinstance(user.desired_job, list) else []
+        desired_job_text = ', '.join(desired_jobs) if len(desired_jobs) > 0 else '없음'
+        
         user_summary = f"""
         사용자: {user.name}
-        희망 직무: {user.desired_job}
+        희망 직무: {desired_job_text}
         기술 스택: {[f"{s.skill.name}({s.proficiency})" for s in user.user_skills]}
         자격증: {[c.certificate.name for c in user.user_certificates]}
         경험: {[f"{exp.name} - {exp.period}" for exp in user.experiences]}
@@ -533,18 +537,19 @@ async def generate_todo_list(
             raise BadRequestException("사용자 이력서 분석에 실패했습니다.")
         
         # 2. 직무 시장 갭 분석
-        desired_job = getattr(current_user, 'desired_job', None)
-        if desired_job is None:
-            desired_job = "개발자"
+        # desired_job을 JSON 배열로 처리
+        desired_jobs = getattr(current_user, 'desired_job', None)
+        if desired_jobs is None:
+            desired_job_text = "개발자"
         else:
-            desired_job = str(desired_job)
+            desired_job_text = ', '.join(str(d) for d in desired_jobs)
             
-        gap_analysis = await analyze_job_market_gaps(current_user, desired_job)
+        gap_analysis = await analyze_job_market_gaps(current_user, desired_job_text)
         if not gap_analysis:
             app_logger.warning("직무 갭 분석에 실패했습니다. 기본 분석으로 진행합니다.")
         
         # 3. 자격증 갭 분석
-        certificate_analysis = await analyze_certificate_gaps(current_user, db, desired_job)
+        certificate_analysis = await analyze_certificate_gaps(current_user, db, desired_job_text)
         
         # 4. 추천 강의 검색
         recommended_courses = await search_recommended_courses(gap_analysis or {}, certificate_analysis)

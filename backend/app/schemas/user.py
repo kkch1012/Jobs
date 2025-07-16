@@ -45,7 +45,7 @@ class ResumeUpdate(BaseModel):
     education_status: Optional[str] = None
     degree: Optional[str] = None
     language_score: Optional[Dict[str, int]] = Field(default_factory=dict)
-    desired_job: Optional[str] = None
+    desired_job: Optional[List[str]] = Field(default_factory=list)  # JSON array로 변경
     working_year: Optional[str] = "신입"
 
     skills: Optional[List[UserSkillCreate]] = None
@@ -65,7 +65,7 @@ class UserResumeResponse(BaseModel):
     education_status: Optional[str] = None
     degree: Optional[str] = None
     language_score: Optional[dict] = Field(default_factory=dict)
-    desired_job: Optional[str] = None
+    desired_job: Optional[List[str]] = Field(default_factory=list)  # JSON array로 변경
     working_year: Optional[str] = "신입"
 
     skills: List[UserSkillResponse] = []

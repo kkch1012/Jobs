@@ -98,6 +98,26 @@ class OpenRouterClient:
                 "parameters": {
                     "top_n": "추천 개수 (기본값: 20)"
                 }
+            },
+            "update_resume": {
+                "description": "이력서 정보 수정/추가",
+                "parameters": {
+                    "job_name": "희망직무 (예: 프론트엔드 개발자, 백엔드 엔지니어) - 기존 직무에 추가됨",
+                    "university": "대학교명",
+                    "major": "전공",
+                    "gpa": "학점 (예: 4.0, 3.5)",
+                    "education_status": "학적상태 (재학중/졸업/휴학)",
+                    "degree": "학위 (학사/석사/박사)",
+                    "language_score": "어학점수 (예: TOEIC 900, IELTS 7.0)",
+                    "working_year": "경력연차 (예: 3년, 신입)",
+                    "skills": "기술스택 목록",
+                    "certificates": "자격증 목록",
+                    "experience": "경험 목록"
+                }
+            },
+            "get_my_resume": {
+                "description": "내 이력서 조회",
+                "parameters": {}
             }
         }
         
@@ -130,6 +150,12 @@ class OpenRouterClient:
    - "많이", "더 많은" → 더 큰 숫자
    - "적게", "몇 개" → 더 작은 숫자
 
+6. **이력서 업데이트 파라미터**:
+   - "희망직무 추가", "직무 추가" → job_name 파라미터 추출
+   - "대학교", "전공", "학점" → university, major, gpa 파라미터 추출
+   - "어학점수", "TOEIC", "IELTS" → language_score 파라미터 추출
+   - "경력", "연차" → working_year 파라미터 추출
+
 **Intent 분류 규칙:**
 - 이력서 관련: "내 이력서", "이력서 보여줘" → `get_my_resume`
 - 이력서 수정: "이력서 수정", "이력서 업데이트" → `update_resume`
@@ -154,6 +180,8 @@ class OpenRouterClient:
 - "프론트엔드 개발자 채용공고 찾아줘" → {{"intent": "job_posts", "parameters": {{"job_name": "프론트엔드 개발자"}}}}
 - "Python, React 사용하는 백엔드 개발자 구인" → {{"intent": "job_posts", "parameters": {{"job_name": "백엔드 개발자", "tech_stack": "Python, React"}}}}
 - "네이버에서 신입 개발자 채용" → {{"intent": "job_posts", "parameters": {{"company_name": "네이버", "applicant_type": "신입", "job_name": "개발자"}}}}
+- "내 희망직무에 서버 개발자도 추가해줘" → {{"intent": "update_resume", "parameters": {{"job_name": "서버 개발자"}}}}
+- "이력서에 서울대학교 컴퓨터공학과 추가" → {{"intent": "update_resume", "parameters": {{"university": "서울대학교", "major": "컴퓨터공학과"}}}}
 """
 
         messages: List[ChatCompletionMessageParam] = [

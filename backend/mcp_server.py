@@ -290,18 +290,106 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             headers["Authorization"] = request.authorization
         
         if tool_name == "update_resume":
-            # PUT 요청으로 처리
-            result = await fastapi_client.put_api(
-                endpoint,
-                request.arguments.get("resume_data", {}),
-                headers=headers
-            )
-            return ToolCallResponse(content=[
-                {
-                    "type": "text",
-                    "text": json.dumps(result, ensure_ascii=False)
-                }
-            ])
+            # update_resume의 경우 파라미터를 resume_data 구조로 변환
+            arguments = request.arguments
+            
+            # job_name이 있으면 desired_job으로 변환
+            resume_data = {}
+            if "job_name" in arguments:
+                resume_data["desired_job"] = arguments["job_name"]
+            
+            # 다른 파라미터들도 추가 가능
+            if "university" in arguments:
+                resume_data["university"] = arguments["university"]
+            if "major" in arguments:
+                resume_data["major"] = arguments["major"]
+            if "gpa" in arguments:
+                resume_data["gpa"] = arguments["gpa"]
+            if "education_status" in arguments:
+                resume_data["education_status"] = arguments["education_status"]
+            if "degree" in arguments:
+                resume_data["degree"] = arguments["degree"]
+            if "language_score" in arguments:
+                resume_data["language_score"] = arguments["language_score"]
+            if "working_year" in arguments:
+                resume_data["working_year"] = arguments["working_year"]
+            if "skills" in arguments:
+                resume_data["skills"] = arguments["skills"]
+            if "certificates" in arguments:
+                resume_data["certificates"] = arguments["certificates"]
+            if "experience" in arguments:
+                resume_data["experience"] = arguments["experience"]
+            
+            # 1단계: 현재 이력서 조회
+            try:
+                current_resume = await fastapi_client.call_api("/users/me/resume", headers=headers)
+                
+                # 2단계: 중복 체크
+                duplicate_check = False
+                duplicate_message = ""
+                
+                if "desired_job" in resume_data and current_resume.get("desired_job"):
+                    # JSON 배열로 처리
+                    current_jobs = current_resume["desired_job"] if isinstance(current_resume["desired_job"], list) else []
+                    new_job = resume_data["desired_job"]
+                    
+                    if new_job in current_jobs:
+                        duplicate_check = True
+                        duplicate_message = f"이미 '{new_job}'이(가) 희망직무로 등록되어 있습니다."
+                    else:
+                        # 기존 직무에 새 직무 추가
+                        current_jobs.append(new_job)
+                        resume_data["desired_job"] = current_jobs
+                
+                if "university" in resume_data and current_resume.get("university"):
+                    if resume_data["university"] == current_resume["university"]:
+                        duplicate_check = True
+                        duplicate_message = f"이미 '{resume_data['university']}'이(가) 등록되어 있습니다."
+                
+                if "major" in resume_data and current_resume.get("major"):
+                    if resume_data["major"] == current_resume["major"]:
+                        duplicate_check = True
+                        duplicate_message = f"이미 '{resume_data['major']}' 전공이 등록되어 있습니다."
+                
+                # 중복이 있으면 메시지 반환
+                if duplicate_check:
+                    return ToolCallResponse(content=[
+                        {
+                            "type": "text",
+                            "text": json.dumps({
+                                "msg": duplicate_message,
+                                "status": "duplicate",
+                                "current_data": current_resume
+                            }, ensure_ascii=False)
+                        }
+                    ])
+                
+                # 3단계: 중복이 없으면 업데이트 진행
+                result = await fastapi_client.put_api(
+                    endpoint,
+                    resume_data,  # 변환된 resume_data 사용
+                    headers=headers
+                )
+                return ToolCallResponse(content=[
+                    {
+                        "type": "text",
+                        "text": json.dumps(result, ensure_ascii=False)
+                    }
+                ])
+                
+            except Exception as e:
+                # 조회 실패 시에도 업데이트 시도 (기존 동작 유지)
+                result = await fastapi_client.put_api(
+                    endpoint,
+                    resume_data,
+                    headers=headers
+                )
+                return ToolCallResponse(content=[
+                    {
+                        "type": "text",
+                        "text": json.dumps(result, ensure_ascii=False)
+                    }
+                ])
         else:
             # GET 요청으로 처리
             result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)

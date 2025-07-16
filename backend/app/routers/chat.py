@@ -136,6 +136,11 @@ async def save_message_to_mongo(session_id: int, role: str, content: str):
 
 async def generate_llm_summary(intent: str, mcp_result: Dict[str, Any], model: str) -> str:
     """LLM을 사용하여 MCP 결과를 자연어로 요약합니다."""
+    
+    # 중복 체크 결과인 경우 특별 처리
+    if intent == "update_resume" and mcp_result.get("status") == "duplicate":
+        return mcp_result.get("msg", "이미 등록된 정보입니다.")
+    
     summary_prompt = f"""
 아래는 사용자의 요청 intent와 MCP 서버에서 받아온 원본 데이터입니다.
 - intent: {intent}

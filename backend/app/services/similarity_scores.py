@@ -28,11 +28,15 @@ def summarize_user_for_embedding(user: User) -> str:
     if getattr(user, 'language_score', None) is not None and isinstance(user.language_score, dict):
         lang_score = user.language_score.get('OPIC', '없음')
     
+    # desired_job을 JSON 배열로 처리
+    desired_jobs = user.desired_job if isinstance(user.desired_job, list) else []
+    desired_job_text = ', '.join(desired_jobs) if len(desired_jobs) > 0 else '없음'
+    
     return (
         f"이름: {user.name}\n"
         f"성별: {user.gender}, 학교: {user.university}, 학과: {user.major}, "
         f"학위: {user.degree}, 학력 상태: {user.education_status}\n"
-        f"희망 직무: {user.desired_job}\n"
+        f"희망 직무: {desired_job_text}\n"
         f"어학 점수: {lang_score}\n"
         f"기술 스택: {', '.join(skills) or '없음'}\n"
         f"자격증: {', '.join(certs) or '없음'}\n"
