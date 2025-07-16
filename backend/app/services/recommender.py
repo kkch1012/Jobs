@@ -59,8 +59,12 @@ def call_qwen_api(prompt: str, api_key: str) -> str | None:
         "Content-Type": "application/json",
         "X-Title": "Job Recommender"
     }
+    
+    # 더 안정적인 모델 사용
+    model = "qwen/qwen3-30b-a3b"
+    
     body = {
-        "model": "qwen/qwen3-4b:free",
+        "model": model,
         "messages": [
             {"role": "system", "content": "너는 한국 채용 시장에 대해 잘 아는 최고의 채용 공고 추천 전문가야. 사용자에게 친근하고 명확한 어조로 설명해줘."},
             {"role": "user", "content": prompt}

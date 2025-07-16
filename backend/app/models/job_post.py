@@ -32,7 +32,7 @@ class JobPost(Base):
     preferred_skills = Column(JSONB, nullable=True)  
     main_tasks_skills = Column(JSONB, nullable=True) 
 
-    full_embedding = Column(Vector(1024), nullable=False)  # 전체 임베딩 추가
+    full_embedding = Column(Vector(1024), nullable=True)  # 전체 임베딩 추가
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 생성 시각
 

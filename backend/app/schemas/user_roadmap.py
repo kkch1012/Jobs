@@ -1,7 +1,7 @@
 from pydantic import BaseModel
+from .roadmap import RoadmapResponse
 
 class UserRoadmapBase(BaseModel):
-    user_id: int
     roadmaps_id: int
 
 class UserRoadmapCreate(UserRoadmapBase):
@@ -9,6 +9,8 @@ class UserRoadmapCreate(UserRoadmapBase):
 
 class UserRoadmapResponse(UserRoadmapBase):
     id: int
+    user_id: int
+    roadmap: RoadmapResponse  # RoadmapResponse 사용
 
     class Config:
         from_attributes = True  # Pydantic v2 기준

@@ -175,3 +175,61 @@ def get_unique_tech_stacks(db: Session = Depends(get_db)):
     except Exception as e:
         app_logger.error(f"기술스택 유니크 리스트 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"기술스택 리스트 조회 중 오류가 발생했습니다: {str(e)}")
+
+@router.get(
+    "/{job_id}",
+    response_model=JobPostResponse,
+    summary="채용공고 상세 조회",
+    description="""
+특정 채용공고의 상세 정보를 조회합니다.
+
+- `job_id`에 해당하는 채용공고가 존재하지 않으면 404 오류를 반환합니다.
+- 로그인한 사용자의 경우 해당 공고와의 유사도 점수도 함께 반환합니다.
+"""
+)
+def get_job_post_detail(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
+    try:
+        # 기본 쿼리 구성
+        if current_user:
+            # 로그인한 사용자의 경우 유사도 점수와 함께 조회
+            query = db.query(JobPost, UserSimilarity.similarity).outerjoin(
+                UserSimilarity,
+                and_(
+                    JobPost.id == UserSimilarity.job_post_id,
+                    UserSimilarity.user_id == current_user.id
+                )
+            ).filter(JobPost.id == job_id)
+        else:
+            # 비로그인 사용자의 경우 유사도 없이 조회
+            query = db.query(JobPost, null().label('similarity')).filter(JobPost.id == job_id)
+
+        # 관계 데이터 미리 로드
+        query = query.options(
+            joinedload(JobPost.job_required_skill)
+        )
+
+        result = query.first()
+        
+        if not result:
+            app_logger.warning(f"채용공고를 찾을 수 없음: job_id={job_id}")
+            raise HTTPException(status_code=404, detail=f"ID {job_id}의 채용공고를 찾을 수 없습니다.")
+
+        job, similarity = result
+        
+        # JobPostResponse 객체 생성
+        response_item = JobPostResponse.model_validate(job)
+        # 유사도 점수 설정
+        response_item.similarity = similarity
+        
+        app_logger.info(f"채용공고 상세 조회 완료: job_id={job_id}, 사용자: {current_user.id if current_user else '비로그인'}")
+        return response_item
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"채용공고 상세 조회 실패: job_id={job_id}, 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"채용공고 상세 조회 중 오류가 발생했습니다: {str(e)}")

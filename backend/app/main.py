@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from app.models import user, user_skill, roadmap, user_roadmap,user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo, close_mongo
+from app.utils.database_events import setup_database_events
 from dotenv import load_dotenv
 from app.routers import (
     auth,
@@ -22,7 +23,8 @@ from app.routers import (
     session,
     todo_list,
     recommender,
-    similarity
+    similarity,
+    stats_generator
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -34,6 +36,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # MongoDB: 비니(Beanie) 초기화
     await init_mongo()
+    # 데이터베이스 이벤트 리스너 설정
+    setup_database_events()
     # 애플리케이션 실행
     yield
     # 앱 종료 시 MongoDB 연결 정리
@@ -87,3 +91,4 @@ app.include_router(session.router)
 app.include_router(todo_list.router)
 app.include_router(recommender.router)
 app.include_router(similarity.router)
+app.include_router(stats_generator.router)

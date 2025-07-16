@@ -62,11 +62,13 @@ def create_user_roadmap(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
         print(f"로드맵 찜 중 오류 발생: {str(e)}")
+        print(f"오류 상세: {traceback.format_exc()}")
         db.rollback()
         raise HTTPException(
             status_code=500, 
-            detail="로드맵 찜 중 서버 오류가 발생했습니다."
+            detail=f"로드맵 찜 중 서버 오류가 발생했습니다: {str(e)}"
         )
 
 # 내 찜한 로드맵 목록
@@ -79,14 +81,22 @@ def create_user_roadmap(
 로그인한 사용자가 찜한 로드맵 목록을 조회합니다.
 
 - 로그인된 사용자 기준으로 본인의 찜 목록만 조회됩니다.
-- 결과는 로드맵 ID 및 유저 ID로 구성된 리스트 형식입니다.
+- 각 찜한 로드맵에 연결된 로드맵 상세 정보도 함께 포함됩니다.
 """
 )
 def get_my_roadmaps(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return db.query(UserRoadmap).filter_by(user_id=current_user.id).all()
+    # 로드맵 정보를 포함하여 조회
+    from app.models.roadmap import Roadmap
+    user_roadmaps = (
+        db.query(UserRoadmap)
+        .join(Roadmap, UserRoadmap.roadmaps_id == Roadmap.id)
+        .filter(UserRoadmap.user_id == current_user.id)
+        .all()
+    )
+    return user_roadmaps
 
 # 찜한 로드맵 삭제
 @router.delete(

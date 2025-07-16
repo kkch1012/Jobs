@@ -18,13 +18,12 @@ router = APIRouter(prefix="/recommend", tags=["Recommend"])
 현재 로그인된 사용자에게 맞춤형 채용공고를 추천합니다.
 
 - **유사도 계산**: 사용자의 프로필(기술, 경험 등)과 각 채용공고의 임베딩 값을 비교하여 유사도를 계산합니다.
-- **LLM 재추천**: 유사도 상위 N개의 공고를 LLM(Qwen)에게 보내, 최종적으로 가장 적합한 5개의 공고와 그 이유를 추천받습니다.
+- **LLM 재추천**: 유사도 상위 20개의 공고를 LLM(Qwen)에게 보내, 최종적으로 가장 적합한 5개의 공고와 그 이유를 추천받습니다.
 - **API 키 필요**: 이 기능을 사용하려면 서버 환경변수에 `OPENROUTER_API_KEY`가 설정되어 있어야 합니다.
 - **권한**: 로그인된 사용자만 사용 가능
 """
 )
 def recommend_for_current_user(
-    top_n: int = 30,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -36,7 +35,7 @@ def recommend_for_current_user(
         )
     
     try:
-        result = recommend_jobs_for_user(current_user, db, api_key, top_n)
+        result = recommend_jobs_for_user(current_user, db, api_key, 20)
         return {"recommendation": result}
     except Exception as e:
         raise HTTPException(
@@ -46,17 +45,16 @@ def recommend_for_current_user(
 
 @router.get(
     "/jobs/ids",
-    summary="추천 채용공고 ID 목록",
+    summary="추천 채용공고 상세 목록",
     description="""
-현재 로그인된 사용자에게 추천할 채용공고 ID 목록만 반환합니다.
+현재 로그인된 사용자에게 추천할 채용공고의 상세 정보를 반환합니다.
 
-- **유사도 기반**: 사용자와 유사도가 높은 상위 N개 공고에서 선별
-- **LLM 선별**: LLM이 30개 중에서 가장 적합한 5개 ID만 추출
-- **응답**: 채용공고 ID 리스트만 반환 (설명 없음)
+- **유사도 기반**: 사용자와 유사도가 높은 상위 20개 공고에서 선별
+- **LLM 선별**: LLM이 20개 중에서 가장 적합한 5개를 선별
+- **응답**: 채용공고 상세 정보와 함께 반환 (user_preference와 유사한 형태)
 """
 )
 def get_recommended_job_ids(
-    top_n: int = 30,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -69,19 +67,20 @@ def get_recommended_job_ids(
     
     try:
         from app.models.job_post import JobPost
+        from app.schemas.job_post import JobPostResponse
         
         jobs = db.query(JobPost).all()
         if not jobs:
-            return {"job_ids": [], "message": "현재 추천할 수 있는 채용 공고가 없습니다."}
+            return {"recommended_jobs": [], "message": "현재 추천할 수 있는 채용 공고가 없습니다."}
 
         user_embedding = get_user_embedding(current_user)
-        top_jobs = get_top_n_jobs(user_embedding, jobs, n=top_n)
+        top_jobs = get_top_n_jobs(user_embedding, jobs, n=20)
 
         if not top_jobs:
-            return {"job_ids": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
+            return {"recommended_jobs": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
 
         # ID 추출 전용 프롬프트 생성
-        job_ids_text = "\n".join([f"공고 ID: {job.id}" for job in top_jobs[:20]])  # 20개만 전송
+        job_ids_text = "\n".join([f"공고 ID: {job.id}" for job in top_jobs])  # 20개 전송
         
         id_extraction_prompt = f"""
 다음은 사용자와 유사도가 높은 채용공고 20개입니다.
@@ -101,6 +100,7 @@ def get_recommended_job_ids(
         # LLM API 호출
         llm_response = call_qwen_api(id_extraction_prompt, api_key)
         
+        recommended_job_ids = []
         if llm_response:
             # JSON 파싱 시도
             try:
@@ -109,25 +109,51 @@ def get_recommended_job_ids(
                 if json_match:
                     json_str = json_match.group()
                     result = json.loads(json_str)
-                    job_ids = result.get("recommended_job_ids", [])
-                    return {"job_ids": job_ids, "total_candidates": len(top_jobs)}
+                    recommended_job_ids = result.get("recommended_job_ids", [])
                 else:
                     raise ValueError("JSON 형식을 찾을 수 없습니다.")
             except Exception as e:
                 print(f"JSON 파싱 실패: {e}")
                 # 파싱 실패 시 상위 5개 ID 반환
-                fallback_ids = [job.id for job in top_jobs[:5]]
-                return {"job_ids": fallback_ids, "total_candidates": len(top_jobs), "note": "LLM 파싱 실패로 상위 5개 반환"}
+                recommended_job_ids = [job.id for job in top_jobs[:5]]
         else:
             # LLM 실패 시 상위 5개 ID 반환
-            fallback_ids = [job.id for job in top_jobs[:5]]
-            return {"job_ids": fallback_ids, "total_candidates": len(top_jobs), "note": "LLM 호출 실패로 상위 5개 반환"}
+            recommended_job_ids = [job.id for job in top_jobs[:5]]
+        
+        # 추천된 ID에 해당하는 채용공고 상세 정보 조회 (유사도 포함)
+        from app.models.user_similarity import UserSimilarity
+        from sqlalchemy import and_, null
+        
+        job_responses = []
+        for job_id in recommended_job_ids:
+            # 유사도 점수와 함께 조회
+            result = db.query(JobPost, UserSimilarity.similarity).outerjoin(
+                UserSimilarity,
+                and_(
+                    JobPost.id == UserSimilarity.job_post_id,
+                    UserSimilarity.user_id == current_user.id
+                )
+            ).filter(JobPost.id == job_id).first()
+            
+            if result:
+                job, similarity = result
+                job_response = JobPostResponse.model_validate(job)
+                job_response.similarity = similarity
+                job_responses.append(job_response)
+        
+        return {
+            "recommended_jobs": job_responses,
+            "total_candidates": len(top_jobs),
+            "recommended_count": len(job_responses)
+        }
             
     except Exception as e:
         raise HTTPException(
             status_code=500, 
-            detail=f"ID 추출 중 오류가 발생했습니다: {str(e)}"
+            detail=f"추천 채용공고 상세 정보 조회 중 오류가 발생했습니다: {str(e)}"
         )
+
+
 
 @router.post(
     "/jobs/explanation",
