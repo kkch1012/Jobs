@@ -7,47 +7,11 @@ from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.user import User
 from app.models.user_similarity import UserSimilarity
-from app.schemas.job_post import JobPostCreate, JobPostResponse
+from app.schemas.job_post import JobPostResponse
 from app.utils.dependencies import get_optional_current_user
 from app.utils.logger import app_logger
 
 router = APIRouter(prefix="/job_posts", tags=["job_posts"])
-
-
-@router.post(
-    "/",
-    response_model=JobPostResponse,
-    operation_id="create_job_post",
-    summary="공고 등록",
-    description="""
-관리자 또는 크롤링 도구가 새로운 채용공고를 등록할 때 사용합니다.
-
-- `JobPostCreate` 스키마를 기반으로 공고 정보를 입력받습니다.
-- 모든 필수 필드(`title`, `company_name`, `job_position`, `posting_date` 등)는 누락 없이 전달되어야 합니다.
-- 공고 ID는 자동으로 생성되며, 생성된 공고 정보를 반환합니다.
-"""
-)
-def create_job_post(job_post: JobPostCreate, db: Session = Depends(get_db)):
-    try:
-        job_data = job_post.dict()
-        
-        # full_embedding이 제공되지 않은 경우 기본값을 빈 리스트로 설정
-        if job_data.get('full_embedding') is None:
-            job_data['full_embedding'] = []
-        
-        db_job = JobPost(**job_data)
-        db.add(db_job)
-        db.commit()
-        db.refresh(db_job)
-        
-        app_logger.info(f"새로운 채용공고 생성 완료: ID {db_job.id}, 회사 {db_job.company_name}")
-        return db_job
-        
-    except Exception as e:
-        app_logger.error(f"채용공고 생성 실패: {str(e)}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"채용공고 생성 중 오류가 발생했습니다: {str(e)}")
-
 
 @router.get(
     "/",
@@ -59,7 +23,7 @@ def create_job_post(job_post: JobPostCreate, db: Session = Depends(get_db)):
     - 기본적으로 50건씩 페이징하여 반환합니다.\n
     - `company_name`, `job_name`, `applicant_type`, `employment_type`, `tech_stack` 쿼리 파라미터로 필터링이 가능합니다.\n
     - `limit`(최대 반환 개수, 기본 50, 최대 100), `offset`(시작 위치) 쿼리 파라미터로 페이지네이션이 가능합니다.\n
-    - **로그인 시, 해당 유저와 공고의 유사도를 함께 반환합니다.**
+    - **로그인 시, 해당 유저와 공고의 유사도(적합도)를 함께 반환합니다.**
     - 마감일(deadline)이 null인 경우 "상시채용"으로 반환합니다.
     """
 )
@@ -75,7 +39,7 @@ def read_job_posts(
     tech_stack: Optional[str] = Query(None, description="기술스택(포함여부)로 필터링")
 ):
     try:
-        # 기본 쿼리 구성
+        # 기본 쿼리 구성 - 유사도 점수와 함께 조회
         if current_user:
             query = db.query(JobPost, UserSimilarity.similarity).outerjoin(
                 UserSimilarity,
@@ -116,12 +80,20 @@ def read_job_posts(
             query = query.filter(and_(*filters))
         
         # 정렬 및 페이징
-        query = query.order_by(JobPost.posting_date.desc())
+        if current_user:
+            # 로그인한 사용자의 경우 유사도 점수로 정렬 (높은 순)
+            query = query.order_by(UserSimilarity.similarity.desc().nullslast(), JobPost.posting_date.desc())
+        else:
+            # 비로그인 사용자의 경우 게시일 순으로 정렬
+            query = query.order_by(JobPost.posting_date.desc())
+            
         job_posts_with_similarity = query.offset(offset).limit(limit).all()
 
         result = []
         for job, similarity in job_posts_with_similarity:
+            # JobPostResponse 객체 생성
             response_item = JobPostResponse.model_validate(job)
+            # 유사도 점수 설정
             response_item.similarity = similarity
             result.append(response_item)
 
@@ -131,7 +103,6 @@ def read_job_posts(
     except Exception as e:
         app_logger.error(f"채용공고 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"채용공고 조회 중 오류가 발생했습니다: {str(e)}")
-
 
 # === 유니크 리스트 엔드포인트 (정적 경로) ===
 @router.get(

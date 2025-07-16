@@ -23,7 +23,7 @@ router = APIRouter(prefix="/visualization", tags=["Visualization"])
 - **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
-    - tech_stack, qualifications, preferences, required_skills, preferred_skills, essential_tech_stack
+    - tech_stack, qualifications, preferences, required_skills, preferred_skills
 - 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
 - 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.
 
@@ -43,7 +43,7 @@ def weekly_skill_frequency(
         "tech_stack",
         enum=[
             "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills", "essential_tech_stack"
+            "required_skills", "preferred_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
@@ -97,7 +97,7 @@ async def resume_vs_job_skill_trend(
         "tech_stack",
         enum=[
             "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills", "essential_tech_stack"
+            "required_skills", "preferred_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),

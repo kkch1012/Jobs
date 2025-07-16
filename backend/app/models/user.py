@@ -6,6 +6,7 @@ from app.models.user_experience import UserExperience
 from app.models.user_certificate import UserCertificate
 from app.models.user_preference import UserPreference
 from app.models.user_roadmap import UserRoadmap
+from app.models.user_similarity import UserSimilarity
 
 class User(Base):
     __tablename__ = "users"

@@ -21,7 +21,7 @@ class JobPost(Base):
     employment_type = Column(String(255), nullable=True)  # 고용형태
     applicant_type = Column(Text, nullable=False)  # 지원 자격
     posting_date = Column(DateTime, nullable=False)  # 공고 게시일
-    deadline = Column(DateTime, nullable=False,default=None)  # 공고 마감일
+    deadline = Column(DateTime, nullable=True)  # 공고 마감일
     main_tasks = Column(Text, nullable=True)  # 주요 업무
     qualifications = Column(Text, nullable=True)  # 자격 요건
     preferences = Column(Text, nullable=True)  # 우대 사항
