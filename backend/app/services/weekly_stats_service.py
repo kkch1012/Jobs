@@ -38,8 +38,11 @@ class WeeklyStatsService:
             logger.info(f"주간 스킬 통계 생성 시작: field_type={field_type}")
             
             # 1. 해당 필드 타입의 기존 통계 전체 삭제 (덮어쓰기 보장)
+            # 특정 날짜의 통계만 삭제
+            today = datetime.now().date()
             deleted_count = db.query(WeeklySkillStat).filter(
-                WeeklySkillStat.field_type == field_type
+                WeeklySkillStat.field_type == field_type,
+                func.date(WeeklySkillStat.created_date) == today
             ).delete()
             db.commit()
             logger.info(f"기존 통계 삭제 완료: {deleted_count}개 (field_type={field_type})")
@@ -138,34 +141,74 @@ class WeeklyStatsService:
         Returns:
             생성된 통계 개수
         """
-        # 1. 해당 직무의 채용공고 조회
+        # 1. 해당 직무의 채용공고 조회 (연속 주차 계산)
         posts = db.query(
-            func.date_part('year', JobPost.posting_date).label('year'),
-            func.date_part('week', JobPost.posting_date).label('week'),
+            JobPost.posting_date,
             getattr(JobPost, field_type)
         ).filter(
             JobPost.job_required_skill_id == job_role.id
         ).all()
         
-        # 2. 주별로 스킬 카운트
+        # 2. 주별로 스킬 카운트 (연속 주차 사용)
         week_skill_counter = defaultdict(Counter)
         for row in posts:
-            year, week, field_value = int(row.year), int(row.week), row[2]
-            if isinstance(field_value, str) and field_value.strip():
-                # 여러 구분자 지원
-                skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-                week_skill_counter[(year, week)].update(skills)
+            posting_date, field_value = row.posting_date, row[1]
+            
+            # 주차.요일 계산 (2025년 1월 1일부터 시작)
+            base_date = datetime(2025, 1, 1)
+            days_diff = (posting_date - base_date).days
+            week_number = (days_diff // 7) + 1  # 1부터 시작하는 연속 주차
+            day_of_week = posting_date.isoweekday()  # 월요일=1, 일요일=7
+            week_day = f"{week_number}.{day_of_week}"
+            
+            skills = []
+            
+            # 필드 타입에 따른 처리
+            if field_type == "tech_stack":
+                # tech_stack은 문자열 필드
+                if isinstance(field_value, str) and field_value.strip():
+                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            else:
+                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
+                if isinstance(field_value, list):
+                    skills = [str(skill).strip() for skill in field_value if skill]
+                elif isinstance(field_value, str) and field_value.strip():
+                    # JSON 문자열인 경우 파싱 시도
+                    try:
+                        import json
+                        parsed = json.loads(field_value)
+                        if isinstance(parsed, list):
+                            skills = [str(skill).strip() for skill in parsed if skill]
+                    except:
+                        # 파싱 실패 시 문자열로 처리
+                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            
+            # 스킬명 길이 제한 (500자)
+            if skills:
+                limited_skills = []
+                for skill in skills:
+                    if len(skill) > 500:
+                        skill = skill[:497] + "..."  # 500자로 제한
+                    limited_skills.append(skill)
+                week_skill_counter[week_day].update(limited_skills)
         
         # 3. 기존 통계는 상위에서 이미 삭제되었으므로 건너뜀
         
         # 4. 새로운 통계 생성
         stats_created = 0
-        for (year, week), counter in week_skill_counter.items():
+        for week_day, counter in week_skill_counter.items():
+            # 해당 주차.요일의 기존 통계 삭제
+            db.query(WeeklySkillStat).filter(
+                WeeklySkillStat.job_role_id == job_role.id,
+                WeeklySkillStat.week_day == week_day,  # week_day는 문자열 "290.1"
+                WeeklySkillStat.field_type == field_type
+            ).delete()
+            
+            # 새로운 통계 생성
             for skill, count in counter.items():
                 stat = WeeklySkillStat(
                     job_role_id=job_role.id,
-                    year=year,
-                    week=week,
+                    week_day=week_day,
                     skill=skill,
                     count=count,
                     field_type=field_type
@@ -211,27 +254,25 @@ class WeeklyStatsService:
             stats = db.query(WeeklySkillStat).filter(
                 WeeklySkillStat.job_role_id == job_role.id,
                 WeeklySkillStat.field_type == field_type,
-                WeeklySkillStat.created_at.isnot(None),
-                WeeklySkillStat.created_at >= target_date
+                WeeklySkillStat.created_date.isnot(None),
+                WeeklySkillStat.created_date >= target_date
             ).order_by(
-                WeeklySkillStat.year.desc(),
-                WeeklySkillStat.week.desc(),
+                WeeklySkillStat.week_day.desc(),
                 WeeklySkillStat.count.desc()
             ).all()
             
             # 3. 응답 형식으로 변환
             result = []
             for stat in stats:
-                created_at_str = None
-                if stat.created_at is not None:
-                    created_at_str = stat.created_at.isoformat()
+                created_date_str = None
+                if stat.created_date is not None:
+                    created_date_str = stat.created_date.isoformat()
                 
                 result.append({
-                    "year": stat.year,
-                    "week": stat.week,
+                    "week_day": stat.week_day,
                     "skill": stat.skill,
                     "count": stat.count,
-                    "created_at": created_at_str
+                    "created_date": created_date_str
                 })
             
             return result
@@ -245,8 +286,7 @@ class WeeklyStatsService:
         db: Session,
         job_name: str,
         skill: str,
-        field_type: str = "tech_stack",
-        weeks_back: int = 12
+        field_type: str = "tech_stack"
     ) -> List[Dict[str, Any]]:
         """
         특정 스킬의 트렌드 데이터를 조회합니다.
@@ -256,7 +296,6 @@ class WeeklyStatsService:
             job_name: 직무명
             skill: 스킬명
             field_type: 필드 타입
-            weeks_back: 몇 주 전까지 조회할지
         
         Returns:
             트렌드 데이터 리스트
@@ -270,29 +309,22 @@ class WeeklyStatsService:
             if not job_role:
                 return []
             
-            # 2. 특정 스킬의 트렌드 조회
-            current_date = datetime.now()
-            target_date = current_date - timedelta(weeks=weeks_back)
-            
+            # 2. 특정 스킬의 모든 트렌드 조회
             stats = db.query(WeeklySkillStat).filter(
                 WeeklySkillStat.job_role_id == job_role.id,
                 WeeklySkillStat.skill == skill,
-                WeeklySkillStat.field_type == field_type,
-                WeeklySkillStat.created_at.isnot(None),
-                WeeklySkillStat.created_at >= target_date
+                WeeklySkillStat.field_type == field_type
             ).order_by(
-                WeeklySkillStat.year.asc(),
-                WeeklySkillStat.week.asc()
+                WeeklySkillStat.week_day.asc()
             ).all()
             
             # 3. 응답 형식으로 변환
             result = []
             for stat in stats:
                 result.append({
-                    "year": stat.year,
-                    "week": stat.week,
+                    "week_day": stat.week_day,
                     "count": stat.count,
-                    "date": f"{stat.year}-W{stat.week:02d}"
+                    "date": f"Week {stat.week_day}"
                 })
             
             return result

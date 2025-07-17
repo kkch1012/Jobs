@@ -228,13 +228,11 @@ def generate_job_explanations(
         if llm_explanation:
             return {
                 "explanations": llm_explanation,
-                "job_count": len(jobs),
                 "user_id": current_user.id
             }
         else:
             return {
                 "explanations": "설명 생성에 실패했습니다.",
-                "job_count": len(jobs),
                 "user_id": current_user.id
             }
             

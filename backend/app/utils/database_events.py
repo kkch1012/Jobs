@@ -59,4 +59,4 @@ def setup_database_events():
         except Exception as e:
             logger.error(f"채용공고 UPDATE 후 통계 생성 실패: {str(e)}")
 
-    logger.info("데이터베이스 이벤트 리스너 설정 완료") 
+    logger.debug("데이터베이스 이벤트 리스너 설정 완료") 
