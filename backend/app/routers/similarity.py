@@ -55,21 +55,18 @@ def compute_and_save_similarity(
 
 @router.post(
     "/compute-all",
-    summary="모든 사용자 유사도 점수 계산 (관리자용)",
+    summary="모든 사용자 유사도 점수 계산 (개발/테스트용)",
     description="""
 모든 사용자에 대해 유사도 점수를 계산하고 저장합니다.
 
 - **주의**: 시간이 오래 걸릴 수 있습니다
-- **권한**: 관리자만 실행 가능
+- **용도**: 개발/테스트용 (FastAPI docs에서만 사용)
 """
 )
 def compute_all_users_similarity(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db)
 ):
-    # 관리자 권한 확인 (예: admin 필드가 있다면)
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
+    # 권한 체크 제거 - 개발/테스트용으로만 사용
     
     try:
         users = db.query(User).all()

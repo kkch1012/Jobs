@@ -1,41 +1,23 @@
 """
 FastAPI 애플리케이션 내 스케줄러 서비스
-매일 아침8에 유사도 계산 배치 작업을 실행합니다.
+매일 아침 8시에 유사도 계산 배치 작업을 실행합니다.
 """
 
 import asyncio
 from datetime import datetime, time
-
-# APScheduler 임포트 (설치 후 활성화)
-try:
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    APSCHEDULER_AVAILABLE = True
-except ImportError:
-    APSCHEDULER_AVAILABLE = False
-    # 더미 클래스 (임시)
-    class AsyncIOScheduler:
-        def __init__(self): pass
-        def add_job(self, *args, **kwargs): pass
-        def start(self): pass
-        def shutdown(self): pass
-        def get_jobs(self): return []
-        @property
-        def running(self): return False
-    
-    class CronTrigger:
-        def __init__(self, *args, **kwargs): pass
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.services.similarity_scores import async_auto_compute_all_users_similarity
 from app.utils.logger import similarity_logger
 
+APSCHEDULER_AVAILABLE = True
 # 전역 스케줄러 인스턴스
 scheduler = AsyncIOScheduler()
 
 async def run_similarity_batch_job():
-    """매일 아침 8 실행되는 유사도 계산 배치 작업"""
+    """매일 아침 8시에 실행되는 유사도 계산 배치 작업"""
     try:
         similarity_logger.info("스케줄된 유사도 계산 배치 작업 시작")
         

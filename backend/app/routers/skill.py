@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.skill import Skill
 from app.schemas.skill import SkillCreate, SkillResponse
 from app.utils.dependencies import get_current_user
 from app.utils.logger import app_logger
-from typing import List
+from typing import List, Optional
 from app.models.user import User
+from sqlalchemy import or_
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -26,6 +27,44 @@ def list_all_skills(
     except Exception as e:
         app_logger.error(f"기술 스택 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"기술 스택 조회 중 오류가 발생했습니다: {str(e)}")
+
+@router.get(
+    "/search",
+    response_model=List[SkillResponse],
+    summary="기술 스택 검색",
+    description="기술 스택을 검색합니다. 부분 문자열 검색을 지원합니다."
+)
+def search_skills(
+    query: str = Query(..., description="검색할 기술명"),
+    limit: int = Query(10, ge=1, le=50, description="최대 반환 개수"),
+    exact_match: bool = Query(False, description="정확한 일치만 검색"),
+    db: Session = Depends(get_db)
+):
+    try:
+        if not query.strip():
+            return []
+        
+        # 검색 쿼리 구성
+        if exact_match:
+            # 정확한 일치 검색
+            skills = db.query(Skill).filter(Skill.name == query.strip()).limit(limit).all()
+        else:
+            # 부분 문자열 검색 (대소문자 구분 없음)
+            search_term = f"%{query.strip()}%"
+            skills = db.query(Skill).filter(
+                or_(
+                    Skill.name.ilike(search_term),
+                    Skill.name.ilike(f"%{query.strip().lower()}%"),
+                    Skill.name.ilike(f"%{query.strip().upper()}%")
+                )
+            ).limit(limit).all()
+        
+        app_logger.info(f"기술 스택 검색 완료: {query} → {len(skills)}건")
+        return skills
+        
+    except Exception as e:
+        app_logger.error(f"기술 스택 검색 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"기술 스택 검색 중 오류가 발생했습니다: {str(e)}")
 
 @router.post(
     "/",

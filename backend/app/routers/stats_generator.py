@@ -7,6 +7,7 @@ from typing import Dict, Any
 import logging
 from datetime import datetime, timedelta
 from app.models.weekly_skill_stat import WeeklySkillStat
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +68,10 @@ async def get_weekly_stats(
     week: int | None = None,  # 특정 주차 입력 (기본값: 현재 주차)
     db: Session = Depends(get_db)
 ):
-    # 현재 주차 계산 (2025년 1월 1일부터 시작)
-    base_date = datetime(2025, 1, 1)
-    current_date = datetime.now()
-    days_diff = (current_date - base_date).days
-    current_week = (days_diff // 7) + 1
+    # 현재 주차 계산 (ISO 주차 기준, 서울 시간대)
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz)
+    year, current_week, day_of_week = current_date.isocalendar()
     
     # week가 None이면 현재 주차로 설정
     if week is None:
@@ -144,11 +144,10 @@ async def get_job_field_trend(
     week: int | None = None,  # 특정 주차 입력 (기본값: 현재 주차)
     db: Session = Depends(get_db)
 ):
-    # 현재 주차 계산 (2025년 1월 1일부터 시작)
-    base_date = datetime(2025, 1, 1)
-    current_date = datetime.now()
-    days_diff = (current_date - base_date).days
-    current_week = (days_diff // 7) + 1
+    # 현재 주차 계산 (ISO 주차 기준, 서울 시간대)
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz)
+    year, current_week, day_of_week = current_date.isocalendar()
     
     # week가 None이면 현재 주차로 설정
     if week is None:

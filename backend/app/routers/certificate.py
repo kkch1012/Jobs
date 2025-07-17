@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.certificate import Certificate
@@ -7,6 +7,7 @@ from app.utils.dependencies import get_current_user
 from app.utils.logger import app_logger
 from typing import List
 from app.models.user import User
+from sqlalchemy import or_
 
 router = APIRouter(prefix="/certificates", tags=["certificates"])
 
@@ -24,6 +25,33 @@ def list_all_certificates(db: Session = Depends(get_db)):
     except Exception as e:
         app_logger.error(f"자격증 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"자격증 조회 중 오류가 발생했습니다: {str(e)}")
+
+@router.get(
+    "/search",
+    response_model=List[CertificateResponse],
+    summary="자격증 검색",
+    description="자격증을 이름 또는 발급기관(issuer)으로 부분 문자열 검색합니다."
+)
+def search_certificates(
+    query: str = Query(..., description="검색할 자격증명 또는 발급기관명"),
+    limit: int = Query(10, ge=1, le=50, description="최대 반환 개수"),
+    db: Session = Depends(get_db)
+):
+    try:
+        if not query.strip():
+            return []
+        search_term = f"%{query.strip()}%"
+        certificates = db.query(Certificate).filter(
+            or_(
+                Certificate.name.ilike(search_term),
+                Certificate.issuer.ilike(search_term)
+            )
+        ).limit(limit).all()
+        app_logger.info(f"자격증 검색 완료: {query} → {len(certificates)}건")
+        return certificates
+    except Exception as e:
+        app_logger.error(f"자격증 검색 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"자격증 검색 중 오류가 발생했습니다: {str(e)}")
 
 @router.post(
     "/",

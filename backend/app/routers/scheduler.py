@@ -22,6 +22,11 @@ def get_status():
 def start():
     """스케줄러 시작"""
     try:
+        # 현재 상태 확인
+        current_status = get_scheduler_status()
+        if current_status.get("running", False):
+            return {"message": "스케줄러가 이미 실행 중입니다.", "status": current_status}
+        
         start_scheduler()
         return {"message": "스케줄러가 시작되었습니다."}
     except Exception as e:

@@ -10,6 +10,7 @@ import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,8 @@ class WeeklyStatsService:
             
             # 1. 해당 필드 타입의 기존 통계 전체 삭제 (덮어쓰기 보장)
             # 특정 날짜의 통계만 삭제
-            today = datetime.now().date()
+            seoul_tz = pytz.timezone('Asia/Seoul')
+            today = datetime.now(seoul_tz).date()
             deleted_count = db.query(WeeklySkillStat).filter(
                 WeeklySkillStat.field_type == field_type,
                 func.date(WeeklySkillStat.created_date) == today
@@ -149,16 +151,13 @@ class WeeklyStatsService:
             JobPost.job_required_skill_id == job_role.id
         ).all()
         
-        # 2. 주별로 스킬 카운트 (연속 주차 사용)
+        # 2. 주별로 스킬 카운트 (ISO 주차 사용)
         week_skill_counter = defaultdict(Counter)
         for row in posts:
             posting_date, field_value = row.posting_date, row[1]
             
-            # 주차.요일 계산 (2025년 1월 1일부터 시작)
-            base_date = datetime(2025, 1, 1)
-            days_diff = (posting_date - base_date).days
-            week_number = (days_diff // 7) + 1  # 1부터 시작하는 연속 주차
-            day_of_week = posting_date.isoweekday()  # 월요일=1, 일요일=7
+            # ISO 주차.요일 계산 (정확한 달력 주차)
+            year, week_number, day_of_week = posting_date.isocalendar()
             week_day = f"{week_number}.{day_of_week}"
             
             skills = []
@@ -204,7 +203,7 @@ class WeeklyStatsService:
                 WeeklySkillStat.field_type == field_type
             ).delete()
             
-            # 새로운 통계 생성
+            # 새로운 통계 생성 (created_date는 __init__에서 자동으로 서울 시간 설정)
             for skill, count in counter.items():
                 stat = WeeklySkillStat(
                     job_role_id=job_role.id,
@@ -247,8 +246,9 @@ class WeeklyStatsService:
             if not job_role:
                 return []
             
-            # 2. 최근 N주 데이터 조회
-            current_date = datetime.now()
+            # 2. 최근 N주 데이터 조회 (서울 시간 기준)
+            seoul_tz = pytz.timezone('Asia/Seoul')
+            current_date = datetime.now(seoul_tz)
             target_date = current_date - timedelta(weeks=weeks_back)
             
             stats = db.query(WeeklySkillStat).filter(

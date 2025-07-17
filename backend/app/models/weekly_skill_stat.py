@@ -2,6 +2,8 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database.PostgreSQL import Base
+from datetime import datetime
+import pytz
 
 class WeeklySkillStat(Base):
     __tablename__ = "weekly_skill_stats"
@@ -10,8 +12,8 @@ class WeeklySkillStat(Base):
     
     # 직무 정보
     job_role_id = Column(Integer, ForeignKey("job_required_skills.id", ondelete="CASCADE"), nullable=False) 
-    # 시간 정보 (주차.요일 형태: 1.1=1주차 월요일, 2.3=2주차 화요일)
-    week_day = Column(String(50), nullable=False)  # 예: "1.1", "2.3", "15.7"
+    # 시간 정보 (주차.요일 형태: 1.11주차 월요일, 2.3=2주차 화요일)
+    week_day = Column(String(50), nullable=False)  # 예: "29.4,30.1
     
     # 스킬 정보
     skill = Column(String(500), nullable=False)
@@ -20,8 +22,8 @@ class WeeklySkillStat(Base):
     # 분석 필드 타입
     field_type = Column(String(50), nullable=False)  # tech_stack, required_skills, preferred_skills, main_tasks_skills
     
-    # 통계 생성 날짜 (년-월-일)
-    created_date = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # 통계 생성 날짜 (서울 시간대)
+    created_date = Column(DateTime(timezone=True), nullable=False)
     
     # 관계 설정
     job_role = relationship("JobRequiredSkill", back_populates="weekly_skill_stats")
@@ -32,3 +34,10 @@ class WeeklySkillStat(Base):
         Index('idx_skill_count', 'skill', 'count'),
         Index('idx_created_date', 'created_date'),
     ) 
+    
+    def __init__(self, **kwargs):
+        # created_date가 설정되지 않았다면 서울 시간으로 설정
+        if 'created_date' not in kwargs:
+            seoul_tz = pytz.timezone('Asia/Seoul')
+            kwargs['created_date'] = datetime.now(seoul_tz)
+        super().__init__(**kwargs) 
