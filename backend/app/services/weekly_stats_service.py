@@ -151,6 +151,11 @@ class WeeklyStatsService:
             JobPost.job_required_skill_id == job_role.id
         ).all()
         
+        # 데이터가 없으면 건너뛰기
+        if not posts:
+            logger.info(f"직무 '{job_role.job_name}' 통계 생성 완료: 0개 (데이터 없음)")
+            return 0
+        
         # 2. 주별로 스킬 카운트 (ISO 주차 사용)
         week_skill_counter = defaultdict(Counter)
         for row in posts:
@@ -193,7 +198,7 @@ class WeeklyStatsService:
         
         # 3. 기존 통계는 상위에서 이미 삭제되었으므로 건너뜀
         
-        # 4. 새로운 통계 생성
+        # 4. 새로운 통계 생성 (카운트 많은 순으로 상위 50개씩만 저장)
         stats_created = 0
         for week_day, counter in week_skill_counter.items():
             # 해당 주차.요일의 기존 통계 삭제
@@ -203,8 +208,14 @@ class WeeklyStatsService:
                 WeeklySkillStat.field_type == field_type
             ).delete()
             
+            # 카운트 많은 순으로 정렬하여 상위 50개만 선택
+            top_skills = counter.most_common(50)
+            
+            # 디버깅을 위한 로그 추가
+            logger.info(f"직무 '{job_role.job_name}' 주차 '{week_day}' 필드 '{field_type}': 총 {len(counter)}개 스킬 중 상위 {len(top_skills)}개 선택")
+            
             # 새로운 통계 생성 (created_date는 __init__에서 자동으로 서울 시간 설정)
-            for skill, count in counter.items():
+            for skill, count in top_skills:
                 stat = WeeklySkillStat(
                     job_role_id=job_role.id,
                     week_day=week_day,

@@ -2,14 +2,15 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
+from starlette.responses import JSONResponse
 from app.database import get_db
 from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
 from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
-from fastapi import Depends
 from app.utils.dependencies import get_current_user
 from app.models.user_skill import UserSkill
 from app.models.user import User
+from app.services.gap_model import perform_gap_analysis_visualization
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
 
@@ -202,3 +203,51 @@ async def resume_vs_job_skill_trend(
                 skill=skill, count=count, status=status, week_day=week_day
             ))
     return response
+
+@router.get("/gap-analysis", response_class=JSONResponse,
+    summary="GPT 기반 갭차이 분석",
+    description="""
+사용자의 이력 정보와 선택한 직무(카테고리)를 바탕으로 GPT(OpenRouter) 기반 갭차이 분석을 수행합니다.\n
+- 분석 결과는 자연어 설명(gap_result)과 부족 역량 Top 5 리스트(top_skills)로 구성됩니다.\n
+- 프론트엔드는 gap_result를 출력용으로, top_skills를 투두리스트 등 내부 활용에 사용할 수 있습니다.\n
+- LLM 호출 실패 시 에러 메시지가 반환될 수 있습니다.
+"""
+)
+def gap_analysis_endpoint(
+    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    사용자의 이력 정보와 선택한 직무를 바탕으로 LLM 기반 갭차이 분석을 수행합니다.
+    분석 결과는 자연어 설명과 부족 역량 Top 5 리스트로 구성됩니다.
+    """
+    try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
+        if hasattr(user_id, "__int__"):
+            user_id = int(user_id)
+        if not isinstance(user_id, int):
+            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
+        result = perform_gap_analysis(user_id, category, db=db)
+
+        # 1. 프론트에 보여줄 자연어 결과
+        gap_result = result["gap_result"]
+
+        # 2. 내부 To-Do 시스템으로 보낼 Top 5 스킬
+        top_skills = result["top_skills"]
+        # 예시: 추후 비동기로 보내거나 DB에 저장
+        # send_to_todo(user_id, top_skills)
+
+        return {
+            "gap_result": gap_result,      # 프론트에 출력할 자연어
+            "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        error_detail = f"갭 분석 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)

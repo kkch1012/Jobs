@@ -7,6 +7,7 @@ from app.models.roadmap import Roadmap
 from app.models.job_post import JobPost
 from app.services.llm_client import llm_client
 from app.services.mcp_client import mcp_client
+from app.services.gap_model import perform_gap_analysis_todo
 from app.utils.dependencies import get_current_user
 from app.utils.exceptions import NotFoundException, BadRequestException, InternalServerException
 from app.utils.logger import app_logger
@@ -66,10 +67,29 @@ async def get_user_favorites(user: User, db: Session) -> Dict[str, Any]:
         app_logger.error(f"찜한 목록 조회 실패: {str(e)}")
         return {"roadmaps": [], "job_posts": []}
 
-async def get_job_gap_analysis(job_title: str) -> List[str]:
-    """직무별 갭 분석을 통해 상위 10개 스택 조회 (외부에서 결과를 받아올 예정)"""
-    # TODO: 외부 서비스에서 갭분석 결과(상위 10개 스택)를 받아와야 함
-    return []
+async def get_job_gap_analysis(job_title: str, user_id: int, db: Session) -> List[str]:
+    """직무별 갭 분석을 통해 상위 10개 스택 조회"""
+    try:
+        app_logger.info(f"갭 분석 시작 - 직무: {job_title}, 사용자 ID: {user_id}")
+        
+        # gap_model을 사용하여 갭 분석 수행
+        gap_result = perform_gap_analysis_todo(user_id, job_title, db)
+        
+        app_logger.info(f"갭 분석 결과: {gap_result}")
+        
+        # top_skills에서 상위 10개만 반환 (최대 10개)
+        top_skills = gap_result.get("top_skills", [])
+        app_logger.info(f"추출된 top_skills: {top_skills}")
+        
+        result = top_skills[:10]  # 상위 10개만 반환
+        app_logger.info(f"최종 반환할 스킬: {result}")
+        
+        return result
+        
+    except Exception as e:
+        app_logger.error(f"갭 분석 실패: {str(e)}")
+        app_logger.error(f"상세 에러: {e.__class__.__name__}: {str(e)}")
+        return []
 
 async def generate_schedule_from_favorites(
     user: User,
@@ -83,7 +103,10 @@ async def generate_schedule_from_favorites(
     favorites = await get_user_favorites(user, db)
     
     # 2. 직무별 상위 10 조회
-    top_skills = await get_job_gap_analysis(job_title)
+    user_id = getattr(user, 'id', None)
+    if user_id is None:
+        raise BadRequestException("사용자 ID를 찾을 수 없습니다.")
+    top_skills = await get_job_gap_analysis(job_title, user_id, db)
     
     #3 LLM을 통한 일정 생성
     prompt = f"""
@@ -92,8 +115,8 @@ async def generate_schedule_from_favorites(
     [목표 직무]
     {job_title}
     
-    [필요한 상위 기술 스택 (10개)]
-    {', '.join(top_skills)}
+    [필요한 상위 기술 스택 (최대 10개)]
+    {', '.join(top_skills[:10])}
     
     [찜한 로드맵 목록]
     {json.dumps(favorites['roadmaps'], ensure_ascii=False, default=str)}
@@ -186,9 +209,10 @@ def create_fallback_schedule(
     for i in range(days):
         day_tasks = []
         
-        # 기술 스택 학습 (상위 5)
-        if i < len(top_skills[:5]):
-            skill = top_skills[i]
+        # 기술 스택 학습 (상위 10개를 60일간 분산)
+        skill_index = i % len(top_skills) if top_skills else -1
+        if skill_index >= 0 and skill_index < len(top_skills):
+            skill = top_skills[skill_index]
             day_tasks.append({
                 "title": f"{skill} 학습",
                 "description": f"{skill}에 대한 기본 개념과 실습",
@@ -299,7 +323,7 @@ async def generate_todo_list(
         # 일정 생성
         schedule_data = await generate_schedule_from_favorites(current_user, job_title, days, db)
         
-        # 사용자 모델에 todo_list 저장
+        # 사용자 모델에 todo_list 저장 (JSON 형태로 저장)
         setattr(current_user, 'todo_list', schedule_data)
         db.commit()
         
