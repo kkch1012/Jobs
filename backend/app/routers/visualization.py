@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Dict, Any
 from starlette.responses import JSONResponse
 from app.database import get_db
 from app.models.job_post import JobPost
@@ -10,7 +10,9 @@ from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
 from app.utils.dependencies import get_current_user
 from app.models.user_skill import UserSkill
 from app.models.user import User
+from app.models.certificate import Certificate
 from app.services.gap_model import perform_gap_analysis_visualization
+from app.services.weekly_stats_service import WeeklyStatsService
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
 
@@ -230,7 +232,7 @@ def gap_analysis_endpoint(
             user_id = int(user_id)
         if not isinstance(user_id, int):
             raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
-        result = perform_gap_analysis(user_id, category, db=db)
+        result = perform_gap_analysis_visualization(user_id, category, db=db)
 
         # 1. 프론트에 보여줄 자연어 결과
         gap_result = result["gap_result"]
@@ -250,4 +252,193 @@ def gap_analysis_endpoint(
     except Exception as e:
         import traceback
         error_detail = f"갭 분석 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+@router.get(
+    "/certificate_stats",
+    summary="자격증별 주간 통계 조회",
+    description="""
+특정 직무에서 자격증 이름이 언급된 주간 통계를 조회합니다.
+- 주간 스킬 통계에서 자격증 DB에 등록된 자격증 이름과 매칭되는 항목만 필터링
+- 자격증의 인기도와 트렌드를 시각화할 수 있는 데이터 제공
+- 필드 타입별로 다른 자격증 통계 확인 가능
+
+**응답 예시:**
+```json
+[
+  {
+    "week_day": "290.1",
+    "certificate_name": "AWS Solutions Architect",
+    "count": 15,
+    "field_type": "tech_stack",
+    "created_date": "2025-01-15T10:30:00"
+  }
+]
+```
+""",
+    response_model=List[Dict[str, Any]]
+)
+def get_certificate_stats(
+    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),
+    field_type: str = Query(
+        "tech_stack",
+        enum=["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"],
+        description="분석 대상 필드 타입"
+    ),
+    weeks_back: int = Query(12, ge=1, le=52, description="몇 주 전까지 조회할지"),
+    db: Session = Depends(get_db)
+):
+    """
+    특정 직무에서 자격증 이름이 언급된 주간 통계를 조회합니다.
+    """
+    try:
+        # 1. 등록된 모든 자격증 이름 조회
+        certificates = db.query(Certificate.name).all()
+        certificate_names = {cert[0].lower().strip() for cert in certificates}
+        
+        if not certificate_names:
+            return []
+        
+        # 2. 주간 스킬 통계 조회
+        weekly_stats = WeeklyStatsService.get_weekly_stats(
+            db=db,
+            job_name=job_name,
+            field_type=field_type,
+            weeks_back=weeks_back
+        )
+        
+        # 3. 자격증 이름과 매칭되는 통계만 필터링 (개선된 매칭 로직)
+        certificate_stats = []
+        for stat in weekly_stats:
+            skill_name = stat["skill"].lower().strip()
+            
+            # 자격증 이름과 매칭 확인 (더 정확한 매칭)
+            for cert_name in certificate_names:
+                # 정확한 매칭 또는 자격증 이름이 스킬명에 포함되는 경우만
+                if (skill_name == cert_name or 
+                    cert_name in skill_name or 
+                    # 자격증 약어 매칭 (예: AWS, CCNA, TOEIC 등)
+                    (len(cert_name) >= 3 and cert_name in skill_name) or
+                    # 특정 키워드가 포함된 경우 (예: "AWS Certified", "CCNA", "TOEIC" 등)
+                    any(keyword in skill_name for keyword in ["certified", "ccna", "ccnp", "toeic", "toefl", "aws", "google", "microsoft", "oracle", "cisco", "red hat", "pmi", "ets"])):
+                    
+                    # 일반적인 단어들 제외 (너무 짧거나 일반적인 단어)
+                    if len(skill_name) >= 3 and skill_name not in ["개발", "운영", "설계", "서비스", "분", "시스템", "이해", "및", "데이터", "프로젝트", "기술", "c", "sql"]:
+                        certificate_stats.append({
+                            "week_day": stat["week_day"],
+                            "certificate_name": stat["skill"],  # 원본 스킬명 유지
+                            "count": stat["count"],
+                            "field_type": field_type,
+                            "created_date": stat["created_date"]
+                        })
+                        break  # 첫 번째 매칭만 사용
+        
+        # 4. 주차별, 카운트별 정렬
+        certificate_stats.sort(key=lambda x: (x["week_day"], -x["count"]))
+        
+        return certificate_stats
+        
+    except Exception as e:
+        import traceback
+        error_detail = f"자격증 통계 조회 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+@router.get(
+    "/certificate_trend",
+    summary="특정 자격증의 트렌드 조회",
+    description="""
+특정 자격증의 시간별 트렌드를 조회합니다.
+- 자격증 이름으로 검색하여 해당 자격증의 인기도 변화 추이 확인
+- 주차별 언급 빈도 변화를 시계열 차트로 시각화 가능
+
+**응답 예시:**
+```json
+[
+  {
+    "week_day": "290.1",
+    "certificate_name": "AWS Solutions Architect",
+    "count": 15,
+    "date": "Week 290.1"
+  }
+]
+```
+""",
+    response_model=List[Dict[str, Any]]
+)
+def get_certificate_trend(
+    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),
+    certificate_name: str = Query(..., description="조회할 자격증명"),
+    field_type: str = Query(
+        "tech_stack",
+        enum=["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"],
+        description="분석 대상 필드 타입"
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    특정 자격증의 트렌드를 조회합니다.
+    """
+    try:
+        # 1. 해당 자격증이 DB에 등록되어 있는지 확인
+        certificate = db.query(Certificate).filter(
+            Certificate.name.ilike(f"%{certificate_name}%")
+        ).first()
+        
+        if not certificate:
+            raise HTTPException(status_code=404, detail="해당 자격증을 찾을 수 없습니다.")
+        
+        # 2. 자격증 이름과 유사한 스킬명들 찾기
+        similar_skills = []
+        weekly_stats = WeeklyStatsService.get_weekly_stats(
+            db=db,
+            job_name=job_name,
+            field_type=field_type,
+            weeks_back=52  # 1년치 데이터
+        )
+        
+        cert_name_lower = certificate.name.lower().strip()
+        for stat in weekly_stats:
+            skill_name = stat["skill"].lower().strip()
+            if cert_name_lower in skill_name or skill_name in cert_name_lower:
+                similar_skills.append(stat["skill"])
+        
+        if not similar_skills:
+            return []
+        
+        # 3. 유사한 스킬들의 트렌드 데이터 조회
+        trend_data = []
+        for skill in similar_skills:
+            skill_trend = WeeklyStatsService.get_trend_data(
+                db=db,
+                job_name=job_name,
+                skill=skill,
+                field_type=field_type
+            )
+            trend_data.extend(skill_trend)
+        
+        # 4. 주차별로 합계 계산
+        week_totals = {}
+        for data in trend_data:
+            week = data["week_day"]
+            if week not in week_totals:
+                week_totals[week] = 0
+            week_totals[week] += data["count"]
+        
+        # 5. 응답 형식으로 변환
+        result = []
+        for week, total_count in sorted(week_totals.items()):
+            result.append({
+                "week_day": week,
+                "certificate_name": certificate.name,
+                "count": total_count,
+                "date": f"Week {week}"
+            })
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"자격증 트렌드 조회 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
         raise HTTPException(status_code=500, detail=error_detail)

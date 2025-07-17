@@ -282,3 +282,130 @@ def recommend_for_specific_user(
             status_code=500, 
             detail=f"추천 생성 중 오류가 발생했습니다: {str(e)}"
         )
+
+@router.get(
+    "/jobs/paginated",
+    summary="유사도 기반 채용공고 페이지별 조회",
+    description="""
+현재 로그인된 사용자와 유사도가 높은 채용공고를 페이지별로 조회합니다.
+
+- **유사도 계산**: 사용자의 프로필과 각 채용공고의 임베딩 값을 비교하여 유사도를 계산
+- **페이지별 조회**: 한 페이지당 5개의 채용공고를 유사도 높은 순으로 반환
+- **페이징**: 프론트엔드에서 페이지 번호를 지정하여 조회 가능
+- **응답**: 채용공고 상세 정보와 유사도 점수, 전체 페이지 수 포함
+
+**응답 예시:**
+```json
+{
+  "jobs": [
+    {
+      "id": 123,
+      "title": "백엔드 개발자",
+      "company_name": "테크컴퍼니",
+      "similarity": 0.85,
+      ...
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_pages": 10,
+    "total_jobs": 50,
+    "jobs_per_page": 5
+  }
+}
+```
+"""
+)
+def get_paginated_recommended_jobs(
+    page: int = 1,
+    jobs_per_page: int = 5,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        from app.models.job_post import JobPost
+        from app.schemas.job_post import JobPostResponse
+        
+        # 모든 채용공고 조회
+        all_jobs = db.query(JobPost).all()
+        if not all_jobs:
+            return {
+                "jobs": [],
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": 0,
+                    "total_jobs": 0,
+                    "jobs_per_page": jobs_per_page
+                },
+                "message": "현재 추천할 수 있는 채용 공고가 없습니다."
+            }
+
+        # 사용자 임베딩 생성
+        user_embedding = get_user_embedding(current_user)
+        
+        # 유사도 계산 및 정렬
+        top_jobs = get_top_n_jobs(user_embedding, all_jobs, n=len(all_jobs))
+        
+        if not top_jobs:
+            return {
+                "jobs": [],
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": 0,
+                    "total_jobs": 0,
+                    "jobs_per_page": jobs_per_page
+                },
+                "message": "회원님과 유사한 채용공고를 찾지 못했습니다."
+            }
+
+        # 페이지네이션 계산
+        total_jobs = len(top_jobs)
+        total_pages = (total_jobs + jobs_per_page - 1) // jobs_per_page  # 올림 나눗셈
+        
+        # 페이지 번호 검증
+        if page < 1:
+            page = 1
+        elif page > total_pages:
+            page = total_pages
+        
+        # 해당 페이지의 채용공고 추출
+        start_index = (page - 1) * jobs_per_page
+        end_index = start_index + jobs_per_page
+        page_jobs = top_jobs[start_index:end_index]
+        
+        # 유사도 점수와 함께 상세 정보 조회
+        from app.models.user_similarity import UserSimilarity
+        from sqlalchemy import and_
+        
+        job_responses = []
+        for job in page_jobs:
+            # 유사도 점수 조회
+            similarity_record = db.query(UserSimilarity.similarity).filter(
+                and_(
+                    UserSimilarity.job_post_id == job.id,
+                    UserSimilarity.user_id == current_user.id
+                )
+            ).first()
+            
+            similarity = similarity_record.similarity if similarity_record else None
+            
+            # JobPostResponse 생성
+            job_response = JobPostResponse.model_validate(job)
+            job_response.similarity = similarity
+            job_responses.append(job_response)
+        
+        return {
+            "jobs": job_responses,
+            "pagination": {
+                "current_page": page,
+                "total_pages": total_pages,
+                "total_jobs": total_jobs,
+                "jobs_per_page": jobs_per_page
+            }
+        }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"페이지별 추천 채용공고 조회 중 오류가 발생했습니다: {str(e)}"
+        )
