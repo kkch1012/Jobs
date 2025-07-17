@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.models import user, user_skill, roadmap, user_roadmap,user_preference
+from app.models import user, user_skill, roadmap, user_roadmap, user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo, close_mongo
 from app.utils.database_events import setup_database_events
