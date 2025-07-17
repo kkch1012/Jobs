@@ -15,7 +15,8 @@ from app.utils.dependencies import get_current_user
 from app.core.security import get_password_hash
 from app.models.skill import Skill
 from app.models.certificate import Certificate
-from app.models.user_experience import UserExperience 
+from app.models.user_experience import UserExperience
+from app.services.similarity_scores import auto_compute_user_similarity 
 
 router = APIRouter(prefix="/users", tags=["User"])
 
@@ -124,6 +125,13 @@ def update_resume(
             db.add(new_exp)
 
     db.commit()
+    
+    # 이력서 업데이트 후 유사도 점수 자동 재계산
+    try:
+        auto_compute_user_similarity(current_user, db)
+    except Exception as e:
+        # 유사도 계산 실패해도 이력서 업데이트는 성공으로 처리
+        print(f"유사도 자동 계산 실패: {str(e)}")
     return {"msg": "이력서 정보가 업데이트되었습니다."}
 
 @router.get("/me/resume", 

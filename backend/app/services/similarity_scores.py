@@ -6,6 +6,9 @@ from app.models.user import User
 from app.models.job_post import JobPost
 from app.models.user_similarity import UserSimilarity
 from app.utils.logger import similarity_logger
+from datetime import datetime, timedelta
+import asyncio
+from typing import List, Optional
 
 # 임베딩 모델 싱글턴
 _embedder = None
@@ -127,3 +130,141 @@ def get_user_similarity_scores(user_id: int, db: Session, limit: int = 20) -> li
         .all()
     )
     return similarities
+
+# === 자동화 함수들 ===
+
+def should_recompute_similarity(user: User, db: Session, max_age_hours: int = 24) -> bool:
+    """사용자의 유사도 점수를 재계산해야 하는지 확인"""
+    # 가장 최근 유사도 점수 조회
+    latest_similarity = (
+        db.query(UserSimilarity)
+        .filter(UserSimilarity.user_id == user.id)
+        .order_by(UserSimilarity.created_at.desc())
+        .first()
+    )
+    
+    if not latest_similarity:
+        similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 없습니다. 재계산이 필요합니다.")
+        return True
+    
+    # 마지막 계산 시간 확인
+    time_diff = datetime.utcnow() - latest_similarity.created_at
+    if time_diff > timedelta(hours=max_age_hours):
+        similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 {time_diff.total_seconds() /3600:0.1f}시간 전에 계산되었습니다. 재계산이 필요합니다.")
+        return True
+    
+    similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 최신입니다. 재계산이 필요하지 않습니다.")
+    return False
+
+def auto_compute_user_similarity(user: User, db: Session) -> bool:
+    """사용자 유사도 자동 계산"""
+    try:
+        similarity_logger.info(f"사용자 {user.id}의 유사도 자동 계산 시작")
+        # 유사도 점수 계산
+        scores = compute_similarity_scores(user, db)
+        if not scores:
+            similarity_logger.warning(f"사용자 {user.id}의 유사도 계산 결과가 없습니다.")
+            return False
+        # 데이터베이스에 저장
+        save_similarity_scores(user, scores, db)
+        similarity_logger.info(f"사용자 {user.id}의 유사도 자동 계산 완료: {len(scores)}개 점수 저장")
+        return True
+    except Exception as e:
+        similarity_logger.error(f"사용자 {user.id}의 유사도 자동 계산 실패: {str(e)}")
+        return False
+
+def auto_compute_all_users_similarity(db: Session) -> dict:
+    """모든 사용자의 유사도 점수 자동 계산"""
+    try:
+        similarity_logger.info("전체 사용자 유사도 자동 계산 시작")
+        users = db.query(User).all()
+        results = {
+            "total_users": len(users),
+            "success_count": 0,
+            "error_count": 0,
+            "skipped_count": 0,
+            "details": []
+        }
+        for user in users:
+            try:
+                # 재계산 필요 여부 확인
+                if should_recompute_similarity(user, db):
+                    success = auto_compute_user_similarity(user, db)
+                    if success:
+                        results["success_count"] += 1
+                        results["details"].append({
+                            "user_id": user.id,
+                            "user_name": user.name,
+                            "status": "success"
+                        })
+                    else:
+                        results["error_count"] += 1
+                        results["details"].append({
+                            "user_id": user.id,
+                            "user_name": user.name,
+                            "status": "failed"
+                        })
+                else:
+                    results["skipped_count"] += 1
+                    results["details"].append({
+                        "user_id": user.id,
+                        "user_name": user.name,
+                        "status": "skipped"
+                    })
+            except Exception as e:
+                results["error_count"] += 1
+                results["details"].append({
+                    "user_id": user.id,
+                    "user_name": getattr(user, 'name', 'Unknown'),
+                    "status": "error",
+                    "error": str(e)
+                })
+        similarity_logger.info(f"전체 사용자 유사도 자동 계산 완료: 성공 {results['success_count']},실패 {results['error_count']}, 건너뜀 {results['skipped_count']}")
+        return results
+    except Exception as e:
+        similarity_logger.error(f"전체 사용자 유사도 자동 계산 실패: {str(e)}")
+        return {
+            "total_users": 0,
+            "success_count": 0,
+            "error_count": 1,
+            "skipped_count": 0,
+            "details": [{"error": str(e)}]
+        }
+
+def auto_compute_similarity_for_new_job(job_id: int, db: Session) -> bool:
+    """새로운 채용공고에 대한 모든 사용자의 유사도 점수 재계산"""
+    try:
+        similarity_logger.info(f"새 채용공고 {job_id}에 대한 전체 사용자 유사도 재계산 시작")
+        users = db.query(User).all()
+        success_count = 0
+        error_count = 0
+        for user in users:
+            try:
+                success = auto_compute_user_similarity(user, db)
+                if success:
+                    success_count += 1
+                else:
+                    error_count += 1
+            except Exception as e:
+                error_count += 1
+                similarity_logger.error(f"사용자 {user.id} 유사도 재계산 실패: {str(e)}")
+        similarity_logger.info(f"새 채용공고 {job_id}에 대한 유사도 재계산 완료: 성공 {success_count}, 실패 {error_count}")
+        return success_count > 0
+    except Exception as e:
+        similarity_logger.error(f"새 채용공고 {job_id}에 대한 유사도 재계산 실패: {str(e)}")
+        return False
+
+async def async_auto_compute_user_similarity(user: User, db: Session) -> bool:
+    """비동기 사용자 유사도 자동 계산"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, auto_compute_user_similarity, user, db)
+
+async def async_auto_compute_all_users_similarity(db: Session) -> dict:
+    """비동기 전체 사용자 유사도 자동 계산"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, auto_compute_all_users_similarity, db)
+
+async def async_auto_compute_similarity_for_new_job(job_id: int, db: Session) -> bool:
+    """비동기 새 채용공고에 대한 유사도 재계산"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, auto_compute_similarity_for_new_job, job_id, db) 

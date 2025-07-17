@@ -1,0 +1,22 @@
+# 크론탭 설정 예시
+# 매일 아침 8시에 유사도 계산 배치 스크립트 실행
+
+# 크론탭 편집: crontab -e
+# 아래 라인 추가:
+
+# 매일 아침 8시에 유사도 계산 배치 실행
+0 8 * * * cd /path/to/your/project/backend && python run_similarity_batch.py >> /var/log/similarity_batch.log 2>&1
+
+# 또는 환경변수와 함께 실행
+0 8 * * * cd /path/to/your/project/backend && /path/to/venv/bin/python run_similarity_batch.py >> /var/log/similarity_batch.log 2>&1
+
+# 로그 확인
+# tail -f /var/log/similarity_batch.log
+
+# 크론탭 확인
+# crontab -l
+
+# 크론탭 서비스 상태 확인 (Linux)
+# sudo systemctl status cron
+# sudo systemctl enable cron
+# sudo systemctl start cron 
