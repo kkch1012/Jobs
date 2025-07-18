@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
@@ -67,7 +67,7 @@ def get_recommended_job_ids(
     
     try:
         from app.models.job_post import JobPost
-        from app.schemas.job_post import JobPostResponse
+        from app.schemas.job_post import JobPostSimpleResponse
         
         jobs = db.query(JobPost).all()
         if not jobs:
@@ -137,7 +137,7 @@ def get_recommended_job_ids(
             
             if result:
                 job, similarity = result
-                job_response = JobPostResponse.model_validate(job)
+                job_response = JobPostSimpleResponse.model_validate(job)
                 job_response.similarity = similarity
                 job_responses.append(job_response)
         
@@ -243,56 +243,19 @@ def generate_job_explanations(
         )
 
 @router.get(
-    "/jobs/{user_id}",
-    summary="특정 사용자 맞춤형 채용공고 추천 (관리자용)",
-    description="""
-특정 사용자 ID에 대한 맞춤형 채용공고를 추천합니다.
-
-- **권한**: 관리자만 사용 가능
-- **주의**: 일반적으로는 `/recommend/jobs`를 사용하세요
-"""
-)
-def recommend_for_specific_user(
-    user_id: int,
-    top_n: int = 30,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    # 관리자 권한 확인 (예: admin 필드가 있다면)
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=403, detail="관리자만 사용할 수 있습니다.")
-    
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise HTTPException(
-            status_code=500, 
-            detail="OPENROUTER_API_KEY 환경변수가 설정되어 있지 않습니다."
-        )
-    
-    # 사용자 존재 확인
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-    
-    try:
-        result = recommend_jobs_for_user(user, db, api_key, top_n)
-        return {"recommendation": result}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"추천 생성 중 오류가 발생했습니다: {str(e)}"
-        )
-
-@router.get(
     "/jobs/paginated",
     summary="유사도 기반 채용공고 페이지별 조회",
     description="""
 현재 로그인된 사용자와 유사도가 높은 채용공고를 페이지별로 조회합니다.
 
-- **유사도 계산**: 사용자의 프로필과 각 채용공고의 임베딩 값을 비교하여 유사도를 계산
-- **페이지별 조회**: 한 페이지당 5개의 채용공고를 유사도 높은 순으로 반환
-- **페이징**: 프론트엔드에서 페이지 번호를 지정하여 조회 가능
+- **유사도 기반 정렬**: UserSimilarity 테이블의 유사도 점수를 기준으로 정렬
+- **페이지별 조회**: 한 페이지당 지정된 개수의 채용공고를 유사도 높은 순으로 반환
+- **페이징**: 프론트엔드에서 페이지 번호와 페이지당 개수를 지정하여 조회 가능
 - **응답**: 채용공고 상세 정보와 유사도 점수, 전체 페이지 수 포함
+
+**요청 파라미터:**
+- `page`: 페이지 번호 (기본값: 1)
+- `jobs_per_page`: 페이지당 공고 수 (기본값: 5, 최대: 50)
 
 **응답 예시:**
 ```json
@@ -317,36 +280,30 @@ def recommend_for_specific_user(
 """
 )
 def get_paginated_recommended_jobs(
-    page: int = 1,
-    jobs_per_page: int = 5,
+    page: int = Query(1, ge=1, description="페이지 번호 (1부터 시작)"),
+    jobs_per_page: int = Query(5, ge=1, le=50, description="페이지당 공고 수 (최대 50)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
         from app.models.job_post import JobPost
-        from app.schemas.job_post import JobPostResponse
+        from app.models.user_similarity import UserSimilarity
+        from app.schemas.job_post import JobPostSimpleResponse
+        from sqlalchemy import and_, null
         
-        # 모든 채용공고 조회
-        all_jobs = db.query(JobPost).all()
-        if not all_jobs:
-            return {
-                "jobs": [],
-                "pagination": {
-                    "current_page": page,
-                    "total_pages": 0,
-                    "total_jobs": 0,
-                    "jobs_per_page": jobs_per_page
-                },
-                "message": "현재 추천할 수 있는 채용 공고가 없습니다."
-            }
-
-        # 사용자 임베딩 생성
-        user_embedding = get_user_embedding(current_user)
+        # 유사도 점수와 함께 채용공고 조회 (유사도 높은 순으로 정렬)
+        query = db.query(JobPost, UserSimilarity.similarity).join(
+            UserSimilarity,
+            and_(
+                JobPost.id == UserSimilarity.job_post_id,
+                UserSimilarity.user_id == current_user.id
+            )
+        ).order_by(UserSimilarity.similarity.desc())
         
-        # 유사도 계산 및 정렬
-        top_jobs = get_top_n_jobs(user_embedding, all_jobs, n=len(all_jobs))
+        # 전체 개수 조회
+        total_jobs = query.count()
         
-        if not top_jobs:
+        if total_jobs == 0:
             return {
                 "jobs": [],
                 "pagination": {
@@ -357,40 +314,22 @@ def get_paginated_recommended_jobs(
                 },
                 "message": "회원님과 유사한 채용공고를 찾지 못했습니다."
             }
-
+        
         # 페이지네이션 계산
-        total_jobs = len(top_jobs)
         total_pages = (total_jobs + jobs_per_page - 1) // jobs_per_page  # 올림 나눗셈
         
         # 페이지 번호 검증
-        if page < 1:
-            page = 1
-        elif page > total_pages:
+        if page > total_pages:
             page = total_pages
         
-        # 해당 페이지의 채용공고 추출
-        start_index = (page - 1) * jobs_per_page
-        end_index = start_index + jobs_per_page
-        page_jobs = top_jobs[start_index:end_index]
+        # 해당 페이지의 채용공고 조회
+        offset = (page - 1) * jobs_per_page
+        job_posts_with_similarity = query.offset(offset).limit(jobs_per_page).all()
         
-        # 유사도 점수와 함께 상세 정보 조회
-        from app.models.user_similarity import UserSimilarity
-        from sqlalchemy import and_
-        
+        # 응답 데이터 구성
         job_responses = []
-        for job in page_jobs:
-            # 유사도 점수 조회
-            similarity_record = db.query(UserSimilarity.similarity).filter(
-                and_(
-                    UserSimilarity.job_post_id == job.id,
-                    UserSimilarity.user_id == current_user.id
-                )
-            ).first()
-            
-            similarity = similarity_record.similarity if similarity_record else None
-            
-            # JobPostResponse 생성
-            job_response = JobPostResponse.model_validate(job)
+        for job, similarity in job_posts_with_similarity:
+            job_response = JobPostSimpleResponse.model_validate(job)
             job_response.similarity = similarity
             job_responses.append(job_response)
         

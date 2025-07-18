@@ -12,7 +12,7 @@ from .certificate import CertificateCreate, CertificateResponse
 from .roadmap import RoadmapCreate, RoadmapUpdate, RoadmapResponse
 
 # Job related schemas
-from .job_post import JobPostResponse
+from .job_post import JobPostResponse, JobPostSimpleResponse, JobPostBasicResponse, JobPostSearchResponse
 from .job_required_skill import JobRequiredSkillCreate, JobRequiredSkillResponse
 
 # Chat and session schemas
@@ -36,7 +36,7 @@ __all__ = [
     "CertificateCreate", "CertificateResponse",
     "RoadmapCreate", "RoadmapUpdate", "RoadmapResponse",
     # Job related
-    "JobPostResponse",
+    "JobPostResponse", "JobPostSimpleResponse", "JobPostBasicResponse", "JobPostSearchResponse",
 
     "JobRequiredSkillCreate", "JobRequiredSkillResponse",
     # Chat and session

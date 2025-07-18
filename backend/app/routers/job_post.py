@@ -7,7 +7,7 @@ from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.user import User
 from app.models.user_similarity import UserSimilarity
-from app.schemas.job_post import JobPostResponse
+from app.schemas.job_post import JobPostResponse, JobPostSearchResponse
 from app.utils.dependencies import get_optional_current_user
 from app.utils.logger import app_logger
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/job_posts", tags=["job_posts"])
 
 @router.get(
     "/",
-    response_model=List[JobPostResponse],
+    response_model=List[JobPostSearchResponse],
     operation_id="read_job_posts",
     summary="전체 채용공고 조회 (필터/페이징 지원)",
     description="""
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/job_posts", tags=["job_posts"])
     - `limit`(최대 반환 개수, 기본 50, 최대 100), `offset`(시작 위치) 쿼리 파라미터로 페이지네이션이 가능합니다.\n
     - **로그인 시, 해당 유저와 공고의 유사도(적합도)를 함께 반환합니다.**
     - 마감일(deadline)이 null인 경우 "상시채용"으로 반환합니다.
+    - **응답**: 검색용 간소화된 정보 (main_tasks, qualifications, preferences 제외)
     """
 )
 def read_job_posts(
@@ -91,8 +92,8 @@ def read_job_posts(
 
         result = []
         for job, similarity in job_posts_with_similarity:
-            # JobPostResponse 객체 생성
-            response_item = JobPostResponse.model_validate(job)
+            # JobPostSearchResponse 객체 생성 (검색용 간소화된 응답)
+            response_item = JobPostSearchResponse.model_validate(job)
             # 유사도 점수 설정
             response_item.similarity = similarity
             result.append(response_item)
