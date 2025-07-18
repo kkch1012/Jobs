@@ -1,28 +1,41 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from typing import List, Union, Optional
 from app.database import get_db
 from app.models.roadmap import Roadmap
-from app.schemas.roadmap import RoadmapCreate, RoadmapUpdate, RoadmapResponse
+from app.schemas.roadmap import (
+    RoadmapCreate, RoadmapUpdate, RoadmapResponse,
+    CourseCreate, CourseUpdate, CourseResponse
+)
 from app.utils.dependencies import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/roadmaps", tags=["Roadmaps"])
 
-# 모든 사용자에게 전체 로드맵 조회
+def roadmap_to_response(roadmap):
+    if roadmap.type == "강의":
+        return CourseResponse.model_validate(roadmap)
+    else:
+        return RoadmapResponse.model_validate(roadmap)
+
+# 모든 사용자에게 전체 로드맵 조회 (타입별 필터링 지원)
 @router.get(
     "/",
-    response_model=list[RoadmapResponse],
-    summary="전체 로드맵 조회",
-    operation_id="get_all_roadmaps",
+    response_model=List[Union[RoadmapResponse, CourseResponse]],
+    summary="전체 로드맵 목록 조회 (타입별 필터링 지원)",
     description="""
-모든 사용자가 등록된 전체 로드맵 목록을 조회할 수 있습니다.
-
-- 인증 여부와 관계없이 누구나 호출 가능합니다.
-- 반환 결과는 `RoadmapResponse` 리스트입니다.
+등록된 모든 로드맵(부트캠프, 강의 등)을 조회합니다.\n\n- 누구나 호출할 수 있습니다.\n- type 파라미터(예: 부트캠프, 강의)로 특정 타입만 필터링할 수 있습니다.\n- 각 타입에 따라 다른 스키마로 반환됩니다.
 """
 )
-def get_all_roadmaps(db: Session = Depends(get_db)):
-    return db.query(Roadmap).all()
+def get_all_roadmaps(
+    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Roadmap)
+    if type:
+        query = query.filter(Roadmap.type == type)
+    roadmaps = query.all()
+    return [roadmap_to_response(r) for r in roadmaps]
 
 
 # 관리자만 로드맵 생성
@@ -36,6 +49,7 @@ def get_all_roadmaps(db: Session = Depends(get_db)):
 
 - 이 API는 관리자만 접근할 수 있습니다.
 - 입력된 정보로 새로운 로드맵을 생성하고 반환합니다.
+- 모든 타입의 로드맵을 RoadmapResponse로 반환합니다.
 """
 )
 def create_roadmap(
@@ -65,6 +79,7 @@ def create_roadmap(
 - 이 API는 관리자만 접근할 수 있습니다.
 - `roadmap_id`에 해당하는 로드맵이 존재하지 않으면 404 오류를 반환합니다.
 - 수정할 필드만 선택적으로 포함할 수 있습니다.
+- 모든 타입의 로드맵을 RoadmapResponse로 반환합니다.
 """
 )
 def update_roadmap(
@@ -127,6 +142,7 @@ def delete_roadmap(
 특정 로드맵의 상세 정보를 조회합니다.
 
 - `roadmap_id`에 해당하는 로드맵이 존재하지 않으면 404 오류를 반환합니다.
+- 모든 타입의 로드맵을 RoadmapResponse로 반환합니다.
 """
 )
 def get_roadmap_detail(

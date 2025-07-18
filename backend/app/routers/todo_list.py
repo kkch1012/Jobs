@@ -8,10 +8,11 @@ from app.models.job_post import JobPost
 from app.services.llm_client import llm_client
 from app.services.mcp_client import mcp_client
 from app.services.gap_model import perform_gap_analysis_todo
+from app.services.roadmap_model import get_roadmap_recommendations
 from app.utils.dependencies import get_current_user
 from app.utils.exceptions import NotFoundException, BadRequestException, InternalServerException
 from app.utils.logger import app_logger
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from openai.types.chat import ChatCompletionMessageParam
 import json
 from datetime import datetime, timedelta
@@ -108,6 +109,65 @@ async def generate_schedule_from_favorites(
         raise BadRequestException("사용자 ID를 찾을 수 없습니다.")
     top_skills = await get_job_gap_analysis(job_title, user_id, db)
     
+    # 3. 갭 분석 결과와 매칭되는 강의들 조회
+    gap_analysis_result = perform_gap_analysis_todo(user_id, job_title, db)
+    recommended_roadmaps = get_roadmap_recommendations(
+        user_id=user_id,
+        category=job_title,
+        gap_result_text=gap_analysis_result["gap_result"],
+        db=db,
+        limit=50  # 더 많은 로드맵을 가져와서 선택
+    )
+    
+    # 4. 부족한 스킬에 매칭되는 강의들 필터링
+    matching_courses = []
+    for roadmap in recommended_roadmaps:
+        if roadmap.get('type') == '강의':
+            # skill_description에서 스킬 추출
+            skill_description = roadmap.get('skill_description', [])
+            if isinstance(skill_description, str):
+                try:
+                    import json
+                    skill_description = json.loads(skill_description)
+                except:
+                    skill_description = [skill_description]
+            
+            # 부족한 스킬과 매칭되는지 확인
+            for skill in top_skills:
+                if any(skill.lower() in str(s).lower() for s in skill_description):
+                    matching_courses.append({
+                        "id": roadmap.get('id'),
+                        "name": roadmap.get('name'),
+                        "type": roadmap.get('type'),
+                        "skill_description": roadmap.get('skill_description'),
+                        "company": roadmap.get('company'),
+                        "price": roadmap.get('price'),
+                        "url": roadmap.get('url'),
+                        "matched_skill": skill
+                    })
+                    break  # 한 스킬이라도 매칭되면 추가
+    
+    # 5. 찜한 로드맵과 매칭 강의를 합쳐서 최종 로드맵 목록 생성
+    final_roadmaps = []
+    
+    # 찜한 부트캠프는 1-2개만 포함
+    bootcamps = [r for r in favorites['roadmaps'] if r.get('type') != '강의']
+    final_roadmaps.extend(bootcamps[:2])  # 최대 2개
+    
+    # 찜한 강의들 추가
+    favorite_courses = [r for r in favorites['roadmaps'] if r.get('type') == '강의']
+    final_roadmaps.extend(favorite_courses)
+    
+    # 매칭된 강의들 추가 (중복 제거)
+    existing_ids = {r.get('id') for r in final_roadmaps}
+    for course in matching_courses:
+        if course.get('id') not in existing_ids:
+            final_roadmaps.append(course)
+            existing_ids.add(course.get('id'))
+    
+    # 최대 10개로 제한
+    final_roadmaps = final_roadmaps[:10]
+    
     #3 LLM을 통한 일정 생성
     prompt = f"""
     다음 정보를 바탕으로 {days}일간의 학습 일정을 생성해주세요:
@@ -121,16 +181,21 @@ async def generate_schedule_from_favorites(
     [찜한 로드맵 목록]
     {json.dumps(favorites['roadmaps'], ensure_ascii=False, default=str)}
     
+    [추천 로드맵 목록 (부족한 스킬에 매칭되는 강의 포함)]
+    {json.dumps(final_roadmaps, ensure_ascii=False, default=str)}
+    
     [찜한 공고 목록]
     {json.dumps(favorites['job_posts'], ensure_ascii=False, default=str)}
     
     요구사항]
-    1. 찜한 로드맵의 시작일/마감일을 고려한 일정 배치
-    2 찜한 공고의 마감일을 고려한 준비 일정
-    3 상위 10개 기술 스택 학습 계획
-   4. 일별 구체적인 학습 목표와 태스크 설정
-    5. 주말에는 복습과 실습 프로젝트 포함
-    6 공고 마감일 전 준비 완료되도록 일정 조정
+    1. 찜한 부트캠프는 1-2개만 포함하고, 나머지는 강의 위주로 구성
+    2. 부족한 스킬에 매칭되는 강의들을 우선적으로 일정에 포함
+    3. 찜한 로드맵의 시작일/마감일을 고려한 일정 배치
+    4. 찜한 공고의 마감일을 고려한 준비 일정
+    5. 상위 10개 기술 스택 학습 계획
+    6. 일별 구체적인 학습 목표와 태스크 설정
+    7. 주말에는 복습과 실습 프로젝트 포함
+    8. 공고 마감일 전 준비 완료되도록 일정 조정
     
 출력 형식]
     다음 JSON 형태로 응답해주세요:
@@ -190,10 +255,10 @@ async def generate_schedule_from_favorites(
             schedule_data = json.loads(json_str)
         else:
             # 기본 구조 생성
-            schedule_data = create_fallback_schedule(job_title, days, top_skills, favorites)
+            schedule_data = create_fallback_schedule(job_title, days, top_skills, favorites, final_roadmaps)
     except json.JSONDecodeError:
         app_logger.warning(f"LLM 응답 JSON 파싱 실패: {response}")
-        schedule_data = create_fallback_schedule(job_title, days, top_skills, favorites)
+        schedule_data = create_fallback_schedule(job_title, days, top_skills, favorites, final_roadmaps)
     
     return schedule_data
 
@@ -201,7 +266,8 @@ def create_fallback_schedule(
     job_title: str, 
     days: int, 
     top_skills: List[str], 
-    favorites: Dict[str, Any]
+    favorites: Dict[str, Any],
+    final_roadmaps: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """LLM 응답 실패 시 기본 일정 생성"""
     
@@ -222,14 +288,17 @@ def create_fallback_schedule(
                 "related_job": None
             })
         
-        # 로드맵 학습 (찜한 로드맵이 있는 경우)
-        if favorites['roadmaps'] and i % 3 == 0:
-            roadmap = favorites['roadmaps'][i % len(favorites['roadmaps'])]
+        # 로드맵 학습 (최종 로드맵 목록 사용)
+        roadmaps_to_use = final_roadmaps if final_roadmaps else favorites['roadmaps']
+        if roadmaps_to_use and i % 3 == 0:
+            roadmap = roadmaps_to_use[i % len(roadmaps_to_use)]
+            roadmap_type = roadmap.get('type', '로드맵')
+            task_type = "course" if roadmap_type == "강의" else "roadmap"
             day_tasks.append({
                 "title": f"{roadmap['name']} 학습",
-                "description": f"{roadmap['name']} 학습",
+                "description": f"{roadmap['name']} 학습 ({roadmap_type})",
                 "duration": "2시간",
-                "type": "roadmap",
+                "type": task_type,
                 "related_roadmap": roadmap['name'],
                 "related_job": None
             })

@@ -26,7 +26,8 @@ from app.routers import (
     recommender,
     similarity,
     stats_generator,
-    scheduler
+    scheduler,
+    mcp
 )
 
 load_dotenv()  # .env 파일에서 환경변수 로드 mcp api 키
@@ -99,3 +100,4 @@ app.include_router(recommender.router)
 app.include_router(similarity.router)
 app.include_router(stats_generator.router)
 app.include_router(scheduler.router)
+app.include_router(mcp.router)

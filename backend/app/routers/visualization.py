@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
 from app.database import get_db
 from app.models.job_post import JobPost
@@ -14,6 +14,7 @@ from app.models.certificate import Certificate
 from app.services.gap_model import perform_gap_analysis_visualization
 from app.services.weekly_stats_service import WeeklyStatsService
 from app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel
+from app.services.roadmap_model import get_roadmap_recommendations
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
 
@@ -319,4 +320,121 @@ def skill_search(
     except Exception as e:
         import traceback
         error_detail = f"스킬 검색 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+@router.get(
+    "/roadmap_recommendations",
+    summary="로드맵 추천",
+    description="""
+사용자의 갭 분석 결과를 바탕으로 맞춤형 로드맵을 추천합니다.
+
+- 갭 분석을 통해 부족한 스킬을 파악
+- 트렌드 스킬과 사용자 스킬을 비교하여 점수 계산
+- 점수가 높은 로드맵을 우선적으로 추천
+- limit 파라미터로 추천 개수 조절 가능 (기본값: 10개)
+- type 파라미터로 부트캠프/강의 필터링 가능
+""",
+    response_model=List[Dict[str, Any]]
+)
+async def get_roadmap_recommendations_endpoint(
+    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
+    limit: int = Query(10, description="추천받을 로드맵 개수 (최대 20개)"),
+    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    사용자에게 맞는 로드맵을 추천합니다.
+    """
+    try:
+        # limit 검증
+        if limit > 20:
+            limit = 20
+        elif limit < 1:
+            limit = 1
+            
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 1. 갭 분석 수행
+        gap_analysis_result = perform_gap_analysis_visualization(user_id, category, db)
+        
+        # 2. 로드맵 추천 수행
+        recommended_roadmaps = get_roadmap_recommendations(
+            user_id=user_id,
+            category=category,
+            gap_result_text=gap_analysis_result["gap_result"],
+            db=db,
+            limit=limit
+        )
+        
+        # 3. type별 필터링
+        if type:
+            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type]
+            return filtered_roadmaps
+        
+        return recommended_roadmaps
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        import traceback
+        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+@router.get(
+    "/roadmap_recommendations/direct",
+    summary="직접 갭 분석 결과로 로드맵 추천",
+    description="""
+이미 수행된 갭 분석 결과를 직접 입력받아 로드맵을 추천합니다.
+
+- 갭 분석 결과 텍스트를 직접 입력
+- 별도의 갭 분석 과정 없이 바로 로드맵 추천
+- 기존 갭 분석 결과를 재활용할 때 유용
+- type 파라미터로 부트캠프/강의 필터링 가능
+""",
+    response_model=List[Dict[str, Any]]
+)
+async def get_roadmap_recommendations_direct(
+    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
+    gap_result_text: str = Query(..., description="갭 분석 결과 텍스트"),
+    limit: int = Query(10, description="추천받을 로드맵 개수 (최대 20개)"),
+    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    직접 입력된 갭 분석 결과로 로드맵을 추천합니다.
+    """
+    try:
+        # limit 검증
+        if limit > 20:
+            limit = 20
+        elif limit < 1:
+            limit = 1
+            
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 로드맵 추천 수행
+        recommended_roadmaps = get_roadmap_recommendations(
+            user_id=user_id,
+            category=category,
+            gap_result_text=gap_result_text,
+            db=db,
+            limit=limit
+        )
+        
+        # type별 필터링
+        if type:
+            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type]
+            return filtered_roadmaps
+        
+        return recommended_roadmaps
+        
+    except Exception as e:
+        import traceback
+        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
         raise HTTPException(status_code=500, detail=error_detail)

@@ -173,6 +173,100 @@ AVAILABLE_TOOLS = {
                 "job_count": {"type": "integer", "description": "추천된 공고 수"}
             }
         }
+    ),
+    "gap_analysis": MCPTool(
+        name="gap_analysis",
+        description="사용자의 이력과 선택한 직무를 바탕으로 GPT 기반 갭 분석을 수행합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "직무 카테고리 (예: 프론트엔드 개발자)"}
+            },
+            "required": ["category"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "gap_result": {"type": "string", "description": "자연어 갭 분석 결과"},
+                "top_skills": {"type": "array", "items": {"type": "string"}, "description": "부족한 스킬 Top 5"}
+            }
+        }
+    ),
+    "skill_search": MCPTool(
+        name="skill_search",
+        description="weekly_skill_stats 테이블에서 스킬명을 검색하여 통계 정보를 반환합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "skill_name": {"type": "string", "description": "검색할 스킬명 (부분 검색 지원)"}
+            },
+            "required": ["skill_name"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "skills": {"type": "array", "items": {"type": "object"}},
+                "total": {"type": "integer"}
+            }
+        }
+    ),
+    "roadmap_recommendations": MCPTool(
+        name="roadmap_recommendations",
+        description="사용자의 갭 분석 결과를 바탕으로 맞춤형 로드맵을 추천합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "직무 카테고리 (예: 프론트엔드 개발자)"},
+                "limit": {"type": "integer", "description": "추천받을 로드맵 개수", "default": 10}
+            },
+            "required": ["category"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "roadmaps": {"type": "array", "items": {"type": "object"}},
+                "total": {"type": "integer"}
+            }
+        }
+    ),
+    "roadmap_recommendations_direct": MCPTool(
+        name="roadmap_recommendations_direct",
+        description="이미 수행된 갭 분석 결과를 직접 입력받아 로드맵을 추천합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "직무 카테고리 (예: 프론트엔드 개발자)"},
+                "gap_result_text": {"type": "string", "description": "갭 분석 결과 텍스트"},
+                "limit": {"type": "integer", "description": "추천받을 로드맵 개수", "default": 10}
+            },
+            "required": ["category", "gap_result_text"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "roadmaps": {"type": "array", "items": {"type": "object"}},
+                "total": {"type": "integer"}
+            }
+        }
+    ),
+    "resume_vs_job_skill_trend": MCPTool(
+        name="resume_vs_job_skill_trend",
+        description="내 이력서(보유 스킬)와 선택한 직무의 주간 스킬 빈도 통계를 비교합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_name": {"type": "string", "description": "비교할 직무명 (예: 백엔드 개발자)"},
+                "field": {"type": "string", "description": "분석 대상 필드명", "default": "tech_stack"}
+            },
+            "required": ["job_name"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "comparison": {"type": "array", "items": {"type": "object"}},
+                "total": {"type": "integer"}
+            }
+        }
     )
 }
 
@@ -277,7 +371,12 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "visualization": "/visualization/weekly_skill_frequency",
             "get_my_resume": "/users/me/resume",
             "update_resume": "/users/me/resume",
-            "job_recommendation": "/recommend/jobs"
+            "job_recommendation": "/recommend/jobs",
+            "gap_analysis": "/visualization/gap-analysis",
+            "skill_search": "/visualization/skill_search",
+            "roadmap_recommendations": "/visualization/roadmap_recommendations",
+            "roadmap_recommendations_direct": "/visualization/roadmap_recommendations/direct",
+            "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend"
         }
         
         endpoint = endpoint_mapping.get(tool_name)
@@ -422,19 +521,76 @@ async def chat_with_mcp(request: MCPRequest):
             )
         
         try:
+            # 도구별 엔드포인트 매핑
+            endpoint_mapping = {
+                "job_posts": "/job_posts/",
+                "certificates": "/certificates/",
+                "skills": "/skills/",
+                "roadmaps": "/roadmaps/",
+                "visualization": "/visualization/weekly_skill_frequency",
+                "get_my_resume": "/users/me/resume",
+                "update_resume": "/users/me/resume",
+                "job_recommendation": "/recommend/jobs",
+                "gap_analysis": "/visualization/gap-analysis",
+                "skill_search": "/visualization/skill_search",
+                "roadmap_recommendations": "/visualization/roadmap_recommendations",
+                "roadmap_recommendations_direct": "/visualization/roadmap_recommendations/direct",
+                "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend"
+            }
+            
+            endpoint = endpoint_mapping.get(tool_name)
+            if not endpoint:
+                return MCPResponse(
+                    error={"message": f"도구 '{tool_name}'에 대한 엔드포인트가 정의되지 않았습니다"},
+                    id=request.id
+                )
+            
             # FastAPI 서버 호출
-            endpoint = f"/{tool_name}/"
             api_result = await fastapi_client.call_api(endpoint, arguments)
             
-            if isinstance(api_result, list):
-                jobs = api_result
+            # 도구별 응답 처리
+            if tool_name == "gap_analysis":
+                if isinstance(api_result, dict) and "gap_result" in api_result:
+                    answer = f"갭 분석이 완료되었습니다.\n\n분석 결과:\n{api_result['gap_result']}\n\n부족한 스킬 Top 5:\n" + "\n".join([f"- {skill}" for skill in api_result.get('top_skills', [])])
+                else:
+                    answer = "갭 분석을 수행할 수 없습니다."
+            elif tool_name == "skill_search":
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"'{arguments.get('skill_name', '')}' 관련 스킬을 {len(api_result)}개 찾았습니다."
+                else:
+                    answer = f"'{arguments.get('skill_name', '')}' 관련 스킬을 찾을 수 없습니다."
+            elif tool_name == "roadmap_recommendations":
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"로드맵을 {len(api_result)}개 추천받았습니다."
+                else:
+                    answer = "추천할 로드맵이 없습니다."
+            elif tool_name == "roadmap_recommendations_direct":
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"직접 로드맵을 {len(api_result)}개 추천받았습니다."
+                else:
+                    answer = "추천할 로드맵이 없습니다."
+            elif tool_name == "resume_vs_job_skill_trend":
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"이력서 vs 직무 스킬 비교 결과를 {len(api_result)}개 찾았습니다."
+                else:
+                    answer = "스킬 비교 결과가 없습니다."
+            elif tool_name == "visualization":
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"주간 스킬 빈도 데이터를 {len(api_result)}개 찾았습니다."
+                else:
+                    answer = "주간 스킬 빈도 데이터가 없습니다."
+            elif tool_name == "job_recommendation":
+                if isinstance(api_result, dict) and "recommendation" in api_result:
+                    answer = api_result["recommendation"]
+                else:
+                    answer = "채용공고 추천을 받을 수 없습니다."
+            elif tool_name in ["job_posts", "certificates", "skills", "roadmaps"]:
+                if isinstance(api_result, list) and len(api_result) > 0:
+                    answer = f"{tool_name.replace('_', ' ').title()}를 {len(api_result)}개 찾았습니다!"
+                else:
+                    answer = f"현재 등록된 {tool_name.replace('_', ' ')}가 없습니다."
             else:
-                jobs = api_result.get("jobs", [])
-
-            if jobs:
-                answer = f"채용공고를 {len(jobs)}개 찾았습니다! ..."
-            else:
-                answer = "현재 등록된 채용공고가 없습니다."
+                answer = f"{tool_name} 도구가 성공적으로 실행되었습니다."
 
             return MCPResponse(
                 result={"content": [{"type": "text", "text": answer}]},
