@@ -64,7 +64,8 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "mcp_endpoints": [
-            "/mcp/chat/",
+            "/mcp_chat/llm/chat/",
+            "/mcp_chat/llm/chat/test",
             "/mcp/tools",
             "/mcp/health"
         ]

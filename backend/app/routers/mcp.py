@@ -6,7 +6,7 @@ from app.utils.dependencies import get_current_user
 from app.models.user import User
 from app.services.mcp_client import mcp_client
 from app.schemas.mcp import (
-    MessageIn, GapAnalysisRequest, GapAnalysisResponse, SkillSearchRequest, 
+    GapAnalysisRequest, GapAnalysisResponse, SkillSearchRequest, 
     SkillSearchResponse, RoadmapRecommendationsRequest, RoadmapRecommendationsResponse,
     RoadmapRecommendationsDirectRequest, ResumeVsJobSkillTrendRequest, 
     ResumeVsJobSkillTrendResponse, WeeklySkillFrequencyRequest, 
@@ -14,7 +14,6 @@ from app.schemas.mcp import (
     ResumeRequest, ResumeResponse, ResumeUpdateResponse
 )
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -208,85 +207,4 @@ async def update_my_resume_via_mcp(
         return ResumeUpdateResponse(message=result.get("message", "업데이트 완료"))
     except Exception as e:
         logger.error(f"MCP 이력서 업데이트 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"이력서 업데이트 실패: {str(e)}")
-
-@router.post("/chat", summary="MCP 채팅", description="MCP 프로토콜을 통한 채팅을 수행합니다.")
-async def chat_with_mcp(
-    request: MessageIn,
-    current_user: User = Depends(get_current_user)
-):
-    """MCP 프로토콜을 통한 채팅을 수행합니다."""
-    try:
-        # 여기서는 간단한 예시로 tools/list 메서드를 호출
-        result = await mcp_client.chat_with_mcp(
-            method="tools/list",
-            params={},
-            request_id=str(request.session_id)
-        )
-        
-        return result
-    except Exception as e:
-        logger.error(f"MCP 채팅 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"MCP 채팅 실패: {str(e)}")
-
-@router.post("/chat/test", summary="MCP 채팅 테스트 (인증 없음)", description="테스트용 MCP 채팅 엔드포인트입니다.")
-async def chat_with_mcp_test(request: MessageIn):
-    """테스트용 MCP 채팅 엔드포인트입니다."""
-    try:
-        # LLM을 통한 의도 분석
-        from app.services.llm_client import llm_client
-        
-        # 사용 가능한 API 목록
-        available_apis = [
-            "job_posts", "certificates", "skills", "roadmaps", 
-            "visualization", "job_recommendation", "update_resume", "get_my_resume"
-        ]
-        
-        # LLM으로 의도 분석
-        intent_analysis = await llm_client.analyze_intent(request.message, available_apis)
-        
-        # 의도에 따른 MCP 도구 호출
-        if intent_analysis.get("intent") != "general" and intent_analysis.get("confidence", 0) > 0.5:
-            try:
-                # MCP 도구 호출
-                tool_name = intent_analysis["intent"]
-                parameters = intent_analysis.get("parameters", {})
-                
-                result = await mcp_client.call_tool(tool_name, parameters)
-                
-                # 결과를 자연어로 변환
-                response_message = await llm_client.generate_response(
-                    f"도구 실행 결과: {json.dumps(result, ensure_ascii=False)}",
-                    f"사용자 질문: {request.message}\n실행된 도구: {tool_name}\n파라미터: {json.dumps(parameters, ensure_ascii=False)}"
-                )
-                
-                return {
-                    "message": response_message,
-                    "intent": intent_analysis,
-                    "tool_result": result
-                }
-            except Exception as tool_error:
-                logger.error(f"MCP 도구 실행 실패: {str(tool_error)}")
-                # 도구 실행 실패 시 일반 응답
-                response_message = await llm_client.generate_response(request.message)
-                return {
-                    "message": response_message,
-                    "intent": intent_analysis,
-                    "error": f"도구 실행 실패: {str(tool_error)}"
-                }
-        else:
-            # 일반 대화 응답
-            response_message = await llm_client.generate_response(request.message)
-            return {
-                "message": response_message,
-                "intent": intent_analysis
-            }
-            
-    except Exception as e:
-        logger.error(f"MCP 채팅 테스트 실패: {str(e)}")
-        # 에러 발생 시 기본 응답
-        return {
-            "message": "죄송합니다. 현재 서비스에 일시적인 문제가 있습니다. 잠시 후 다시 시도해주세요.",
-            "intent": {"type": "error", "confidence": 0.0},
-            "error": str(e)
-        } 
+        raise HTTPException(status_code=500, detail=f"이력서 업데이트 실패: {str(e)}") 

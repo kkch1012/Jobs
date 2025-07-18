@@ -22,7 +22,7 @@ async def test_llm_chat():
                     "message": message
                 }
                 response = await client.post(
-                    f"{FASTAPI_SERVER_URL}/mcp/chat/test",
+                    f"{FASTAPI_SERVER_URL}/mcp_chat/llm/chat/test",
                     json=payload,
                     timeout=30.0
                 )

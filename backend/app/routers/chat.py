@@ -249,6 +249,64 @@ async def chat_with_llm(
         await save_message_to_mongo(data.session_id, "assistant", error_content)
         return create_error_response(data.session_id, error_content)
 
+@router.post("/llm/chat/test", summary="LLM+MCP 기반 AI 챗봇 테스트 (인증 없음)", 
+             description="테스트용 LLM+MCP 통합 채팅 엔드포인트입니다. 인증이 필요 없습니다.")
+async def chat_with_llm_test(
+    data: MessageIn,
+    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
+):
+    """테스트용 LLM+MCP 통합 채팅 엔드포인트입니다."""
+    try:
+        # 0. 사용자 메시지 저장
+        await save_message_to_mongo(data.session_id, "user", data.message)
+
+        # 1. LLM으로 intent 분석
+        intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
+        intent = intent_json.get("intent", "general")
+        parameters = intent_json.get("parameters", {})
+
+        # 2. 도구 호출이 필요한 intent 처리 (인증이 필요 없는 도구들만)
+        mcp_result = None
+        if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization"]:
+            # LLM이 추출한 파라미터를 기본값과 병합
+            parameters = merge_parameters_with_defaults(parameters, intent)
+            
+            try:
+                mcp_result = await mcp_client.call_tool(intent, parameters)
+            except Exception as e:
+                error_content = f"MCP 도구 호출 실패: {str(e)}"
+                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                return create_error_response(data.session_id, error_content)
+
+        # 3. 응답 생성
+        if mcp_result is not None:
+            # MCP 결과가 있는 경우 LLM 요약
+            answer = await generate_llm_summary(intent, mcp_result, model)
+        else:
+            # 일반 대화
+            answer = await llm_client.generate_response(data.message)
+            answer = (answer or "응답 생성 실패").strip()
+
+        # 4. 어시스턴트 메시지 저장
+        await save_message_to_mongo(data.session_id, "assistant", answer)
+
+        # 5. 응답 반환
+        response = {
+            "message": answer,  # 테스트용이므로 'message'로 통일
+            "intent": intent_json,
+            "parameters": parameters
+        }
+        
+        if mcp_result is not None:
+            response["mcp_result"] = mcp_result
+            
+        return response
+
+    except Exception as e:
+        error_content = f"채팅 처리 중 오류가 발생했습니다: {str(e)}"
+        await save_message_to_mongo(data.session_id, "assistant", error_content)
+        return create_error_response(data.session_id, error_content)
+
 @router.get("/history", summary="세션별 채팅 이력 조회", description="특정 세션 ID의 모든 채팅 메시지(유저/AI)를 시간순으로 반환합니다.")
 async def get_chat_history(session_id: int):
     try:
