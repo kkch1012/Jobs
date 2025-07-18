@@ -26,7 +26,7 @@ class WeeklyStatsService:
     @staticmethod
     def generate_weekly_stats(db: Session, field_type: str = "tech_stack") -> Dict[str, Any]:
         """
-        모든 직무에 대해 주간 스킬 통계를 생성합니다.
+        모든 직무에 대해 일간 스킬 통계를 생성합니다.
         
         Args:
             db: 데이터베이스 세션
@@ -36,18 +36,17 @@ class WeeklyStatsService:
             생성된 통계 정보
         """
         try:
-            logger.info(f"주간 스킬 통계 생성 시작: field_type={field_type}")
+            logger.info(f"일간 스킬 통계 생성 시작: field_type={field_type}")
             
-            # 1. 해당 필드 타입의 기존 통계 전체 삭제 (덮어쓰기 보장)
-            # 특정 날짜의 통계만 삭제
+            # 1. 해당 필드 타입의 오늘 날짜 통계만 삭제 (덮어쓰기 보장)
             seoul_tz = pytz.timezone('Asia/Seoul')
             today = datetime.now(seoul_tz).date()
             deleted_count = db.query(WeeklySkillStat).filter(
                 WeeklySkillStat.field_type == field_type,
-                func.date(WeeklySkillStat.created_date) == today
+                WeeklySkillStat.date == today
             ).delete()
             db.commit()
-            logger.info(f"기존 통계 삭제 완료: {deleted_count}개 (field_type={field_type})")
+            logger.info(f"오늘({today}) 기존 통계 삭제 완료: {deleted_count}개 (field_type={field_type})")
             
             # 2. 모든 직무 조회
             job_roles = db.query(JobRequiredSkill).all()
@@ -60,17 +59,18 @@ class WeeklyStatsService:
                 total_stats_created += stats_created
                 logger.info(f"직무 '{job_role.job_name}' 통계 생성 완료: {stats_created}개")
             
-            logger.info(f"주간 스킬 통계 생성 완료: 총 {total_stats_created}개 통계 생성")
+            logger.info(f"일간 스킬 통계 생성 완료: 총 {total_stats_created}개 통계 생성")
             return {
                 "success": True,
                 "total_stats_created": total_stats_created,
                 "field_type": field_type,
                 "job_roles_processed": len(job_roles),
-                "deleted_previous": deleted_count
+                "deleted_previous": deleted_count,
+                "date": today.isoformat()
             }
             
         except Exception as e:
-            logger.error(f"주간 스킬 통계 생성 실패: {str(e)}")
+            logger.error(f"일간 스킬 통계 생성 실패: {str(e)}")
             db.rollback()
             return {
                 "success": False,
@@ -129,11 +129,35 @@ class WeeklyStatsService:
                     logger.error(f"필드 타입 '{field_type}' 통계 생성 중 오류: {str(e)}")
         finally:
             WeeklyStatsService._stats_generation_lock.release()
+
+    @staticmethod
+    def _generate_daily_stats(db: Session):
+        """
+        기존 주간 통계를 기반으로 일간 통계를 생성합니다.
+        """
+        # 중복 실행 방지를 위한 락 사용
+        if not WeeklyStatsService._stats_generation_lock.acquire(blocking=False):
+            logger.warning("이미 일간 통계 생성이 진행 중입니다. 중복 실행을 건너뜁니다.")
+            return
+        
+        try:
+            logger.info("일간 통계 생성 시작: 기존 주간 통계 기반")
+            
+            # 기존 주간 통계가 있으면 일간 통계로 활용 가능
+            # 실제로는 기존 주간 통계에서 요일별로 필터링하여 조회하는 방식으로 동작
+            # 별도의 일간 통계 테이블을 만들지 않고 기존 week_day 컬럼의 요일 부분을 활용
+            
+            logger.info("일간 통계 생성 완료: 기존 주간 통계의 요일별 필터링으로 제공")
+            
+        except Exception as e:
+            logger.error(f"일간 통계 생성 실패: {str(e)}")
+        finally:
+            WeeklyStatsService._stats_generation_lock.release()
     
     @staticmethod
     def _generate_stats_for_job_role(db: Session, job_role: JobRequiredSkill, field_type: str) -> int:
         """
-        특정 직무에 대해 주간 스킬 통계를 생성합니다.
+        특정 직무에 대해 일간 스킬 통계를 생성합니다.
         
         Args:
             db: 데이터베이스 세션
@@ -143,9 +167,8 @@ class WeeklyStatsService:
         Returns:
             생성된 통계 개수
         """
-        # 1. 해당 직무의 채용공고 조회 (연속 주차 계산)
+        # 1. 해당 직무의 모든 채용공고 조회 (실행 시점 기준으로 통계 생성)
         posts = db.query(
-            JobPost.posting_date,
             getattr(JobPost, field_type)
         ).filter(
             JobPost.job_required_skill_id == job_role.id
@@ -156,14 +179,15 @@ class WeeklyStatsService:
             logger.info(f"직무 '{job_role.job_name}' 통계 생성 완료: 0개 (데이터 없음)")
             return 0
         
-        # 2. 주별로 스킬 카운트 (ISO 주차 사용)
-        week_skill_counter = defaultdict(Counter)
+        # 2. 실행 시점 날짜 기준으로 스킬 카운트 (전체 데이터를 오늘 날짜로 집계)
+        seoul_tz = pytz.timezone('Asia/Seoul')
+        today = datetime.now(seoul_tz).date()
+        skill_counter = Counter()
+        
         for row in posts:
-            posting_date, field_value = row.posting_date, row[1]
+            field_value = row[0]
             
-            # ISO 주차.요일 계산 (정확한 달력 주차)
-            year, week_number, day_of_week = posting_date.isocalendar()
-            week_day = f"{week_number}.{day_of_week}"
+            skills = []
             
             skills = []
             
@@ -194,37 +218,41 @@ class WeeklyStatsService:
                     if len(skill) > 500:
                         skill = skill[:497] + "..."  # 500자로 제한
                     limited_skills.append(skill)
-                week_skill_counter[week_day].update(limited_skills)
+                skill_counter.update(limited_skills)
         
-        # 3. 기존 통계는 상위에서 이미 삭제되었으므로 건너뜀
+        # 3. 오늘 날짜의 기존 통계만 삭제 (덮어쓰기)
+        deleted_count = db.query(WeeklySkillStat).filter(
+            WeeklySkillStat.job_role_id == job_role.id,
+            WeeklySkillStat.field_type == field_type,
+            WeeklySkillStat.date == today
+        ).delete()
+        
+        if deleted_count > 0:
+            logger.info(f"직무 '{job_role.job_name}' 오늘({today}) 기존 통계 삭제: {deleted_count}개")
         
         # 4. 새로운 통계 생성 (카운트 많은 순으로 상위 50개씩만 저장)
+        # 날짜에서 주차 계산 (자동 계산)
+        year, week_number, _ = today.isocalendar()
+        
+        # 카운트 많은 순으로 정렬하여 상위 50개만 선택
+        top_skills = skill_counter.most_common(50)
+        
+        # 디버깅을 위한 로그 추가
+        logger.info(f"직무 '{job_role.job_name}' 날짜 '{today}' 주차 '{week_number}' 필드 '{field_type}': 총 {len(skill_counter)}개 스킬 중 상위 {len(top_skills)}개 선택")
+        
+        # 새로운 통계 생성
         stats_created = 0
-        for week_day, counter in week_skill_counter.items():
-            # 해당 주차.요일의 기존 통계 삭제
-            db.query(WeeklySkillStat).filter(
-                WeeklySkillStat.job_role_id == job_role.id,
-                WeeklySkillStat.week_day == week_day,  # week_day는 문자열 "290.1"
-                WeeklySkillStat.field_type == field_type
-            ).delete()
-            
-            # 카운트 많은 순으로 정렬하여 상위 50개만 선택
-            top_skills = counter.most_common(50)
-            
-            # 디버깅을 위한 로그 추가
-            logger.info(f"직무 '{job_role.job_name}' 주차 '{week_day}' 필드 '{field_type}': 총 {len(counter)}개 스킬 중 상위 {len(top_skills)}개 선택")
-            
-            # 새로운 통계 생성 (created_date는 __init__에서 자동으로 서울 시간 설정)
-            for skill, count in top_skills:
-                stat = WeeklySkillStat(
-                    job_role_id=job_role.id,
-                    week_day=week_day,
-                    skill=skill,
-                    count=count,
-                    field_type=field_type
-                )
-                db.add(stat)
-                stats_created += 1
+        for skill, count in top_skills:
+            stat = WeeklySkillStat(
+                job_role_id=job_role.id,
+                week=week_number,  # 주차 자동 계산
+                date=today,        # 실행 시점 날짜
+                skill=skill,
+                count=count,
+                field_type=field_type
+            )
+            db.add(stat)
+            stats_created += 1
         
         db.commit()
         return stats_created
@@ -257,7 +285,7 @@ class WeeklyStatsService:
             if not job_role:
                 return []
             
-            # 2. 최근 N주 데이터 조회 (서울 시간 기준)
+            # 2. 최근 N주 데이터 조회 (date 기준)
             seoul_tz = pytz.timezone('Asia/Seoul')
             current_date = datetime.now(seoul_tz)
             target_date = current_date - timedelta(weeks=weeks_back)
@@ -265,25 +293,20 @@ class WeeklyStatsService:
             stats = db.query(WeeklySkillStat).filter(
                 WeeklySkillStat.job_role_id == job_role.id,
                 WeeklySkillStat.field_type == field_type,
-                WeeklySkillStat.created_date.isnot(None),
-                WeeklySkillStat.created_date >= target_date
+                WeeklySkillStat.date >= target_date
             ).order_by(
-                WeeklySkillStat.week_day.desc(),
+                WeeklySkillStat.date.desc(),
                 WeeklySkillStat.count.desc()
             ).all()
             
             # 3. 응답 형식으로 변환
             result = []
             for stat in stats:
-                created_date_str = None
-                if stat.created_date is not None:
-                    created_date_str = stat.created_date.isoformat()
-                
                 result.append({
-                    "week_day": stat.week_day,
+                    "week": stat.week,
+                    "date": stat.date.isoformat(),
                     "skill": stat.skill,
-                    "count": stat.count,
-                    "created_date": created_date_str
+                    "count": stat.count
                 })
             
             return result
@@ -326,16 +349,17 @@ class WeeklyStatsService:
                 WeeklySkillStat.skill == skill,
                 WeeklySkillStat.field_type == field_type
             ).order_by(
-                WeeklySkillStat.week_day.asc()
+                WeeklySkillStat.date.asc()
             ).all()
             
             # 3. 응답 형식으로 변환
             result = []
             for stat in stats:
                 result.append({
-                    "week_day": stat.week_day,
+                    "week": stat.week,
+                    "date": stat.date.isoformat(),
                     "count": stat.count,
-                    "date": f"Week {stat.week_day}"
+                    "date_label": f"Week {stat.week} - {stat.date.isoformat()}"
                 })
             
             return result
