@@ -82,6 +82,10 @@ def score_skills(user_skills: List[str], top_skills: List[str], skill_order: Lis
             "total_score": total_score
         })
 
+    if not scored_skills:
+        # 스킬이 없는 경우 빈 DataFrame 반환
+        return pd.DataFrame()
+    
     scored_df = pd.DataFrame(scored_skills).sort_values(by="total_score", ascending=False).reset_index(drop=True)
     return scored_df
 
@@ -98,7 +102,10 @@ def apply_score_to_roadmaps(roadmaps: pd.DataFrame, scored_df: pd.DataFrame) -> 
         점수가 적용된 로드맵 DataFrame
     """
     # 스킬-점수 매핑
-    skill_score_map = dict(zip(scored_df["skill"], scored_df["total_score"]))
+    if scored_df.empty:
+        skill_score_map = {}
+    else:
+        skill_score_map = dict(zip(scored_df["skill"], scored_df["total_score"]))
 
     # 점수 계산 함수
     def calculate_score(skill_list):
@@ -210,10 +217,10 @@ def get_roadmap_recommendations(
         category: 직무 카테고리
         gap_result_text: 갭 분석 결과 텍스트
         db: 데이터베이스 세션
-        limit: 반환할 로드맵 개수
+        limit: 각 타입별로 반환할 로드맵 개수 (부트캠프 limit개 + 강의 limit개)
     
     Returns:
-        추천 로드맵 리스트
+        추천 로드맵 리스트 (부트캠프 + 강의)
     """
     try:
         # 갭 분석에서 상위 스킬 추출
@@ -225,12 +232,20 @@ def get_roadmap_recommendations(
             user_id, category, top_skills, gap_result_text, db
         )
         
-        # 상위 N개만 반환
-        top_roadmaps = recommended_roadmaps.head(limit)
+        if recommended_roadmaps.empty:
+            logger.warning("추천할 로드맵이 없습니다.")
+            return []
+        
+        # 부트캠프와 강의를 분리
+        bootcamps = recommended_roadmaps[recommended_roadmaps['type'] == '부트캠프'].head(limit)
+        courses = recommended_roadmaps[recommended_roadmaps['type'] == '강의'].head(limit)
+        
+        # 결과 합치기
+        combined_roadmaps = pd.concat([bootcamps, courses], ignore_index=True)
         
         # 딕셔너리 리스트로 변환
         result = []
-        for _, roadmap in top_roadmaps.iterrows():
+        for _, roadmap in combined_roadmaps.iterrows():
             roadmap_dict = roadmap.to_dict()
             # datetime 객체를 문자열로 변환
             for key, value in roadmap_dict.items():
@@ -238,6 +253,7 @@ def get_roadmap_recommendations(
                     roadmap_dict[key] = value.isoformat()
             result.append(roadmap_dict)
         
+        logger.info(f"로드맵 추천 완료: 부트캠프 {len(bootcamps)}개, 강의 {len(courses)}개")
         return result
         
     except Exception as e:

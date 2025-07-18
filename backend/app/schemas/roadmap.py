@@ -8,7 +8,6 @@ class CommonBase(BaseModel):
     type: str = Field(..., description="유형")
     skill_description: List[str] | Dict[str, Any] = Field(..., description="기술명")
     company: Optional[str] = Field(None, description="회사명")
-    price: Optional[str] = Field(None, description="가격")
 
 # ===== 공통 Update BaseModel =====
 class CommonUpdate(BaseModel):
@@ -16,7 +15,6 @@ class CommonUpdate(BaseModel):
     type: Optional[str] = None
     skill_description: Optional[List[str] | Dict[str, Any]] = None
     company: Optional[str] = None
-    price: Optional[str] = None
 
 # ===== 부트캠프용 스키마 =====
 class RoadmapBase(CommonBase):
@@ -51,12 +49,14 @@ class RoadmapResponse(RoadmapBase):
 # ===== 강의용 스키마 =====
 class CourseBase(CommonBase):
     link: Optional[str] = Field(None, description="강의 링크")
+    price: Optional[str] = Field(None, description="가격")
 
 class CourseCreate(CourseBase):
     pass
 
 class CourseUpdate(CommonUpdate):
     link: Optional[str] = None
+    price: Optional[str] = None
 
 class CourseResponse(CourseBase):
     id: int

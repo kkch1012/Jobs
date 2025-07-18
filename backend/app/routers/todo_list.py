@@ -5,6 +5,7 @@ from app.models.user import User
 from app.models.user_roadmap import UserRoadmap
 from app.models.roadmap import Roadmap
 from app.models.job_post import JobPost
+from app.models.user_preference import UserPreference
 from app.services.llm_client import llm_client
 from app.services.mcp_client import mcp_client
 from app.services.gap_model import perform_gap_analysis_todo
@@ -44,21 +45,20 @@ async def get_user_favorites(user: User, db: Session) -> Dict[str, Any]:
                 "skill_description": ur.roadmap.skill_description
             })
         
-        # 찜한 공고 조회 (User 모델에 찜한 공고 필드가 있다고 가정)
-        # 만약 별도 테이블이 있다면 해당 테이블에서 조회
+        # 찜한 공고 조회 (UserPreference 테이블에서 조회)
         job_posts = []
-        if hasattr(user, 'favorite_jobs') and user.favorite_jobs:
-            for job_id in user.favorite_jobs:
-                job = db.query(JobPost).filter(JobPost.id == job_id).first()
-                if job:
-                    job_posts.append({
-                        "id": job.id,
-                        "title": job.title,
-                        "company": job.company,
-                        "posting_date": job.posting_date,
-                        "deadline": job.deadline,
-                        "required_skills": job.required_skills
-                    })
+        user_preferences = db.query(UserPreference).filter(UserPreference.user_id == user.id).all()
+        for pref in user_preferences:
+            job = db.query(JobPost).filter(JobPost.id == pref.job_post_id).first()
+            if job:
+                job_posts.append({
+                    "id": job.id,
+                    "title": job.title,
+                    "company": job.company_name,  # company_name 필드 사용
+                    "posting_date": job.posting_date,
+                    "deadline": job.deadline,
+                    "required_skills": job.required_skills
+                })
         
         return {
             "roadmaps": roadmap_list,
@@ -127,7 +127,6 @@ async def generate_schedule_from_favorites(
             skill_description = roadmap.get('skill_description', [])
             if isinstance(skill_description, str):
                 try:
-                    import json
                     skill_description = json.loads(skill_description)
                 except:
                     skill_description = [skill_description]
@@ -169,6 +168,10 @@ async def generate_schedule_from_favorites(
     final_roadmaps = final_roadmaps[:10]
     
     #3 LLM을 통한 일정 생성
+    # 현재 날짜 계산
+    from datetime import datetime, timedelta
+    current_date = datetime.now()
+    
     prompt = f"""
     다음 정보를 바탕으로 {days}일간의 학습 일정을 생성해주세요:
     
@@ -196,6 +199,7 @@ async def generate_schedule_from_favorites(
     6. 일별 구체적인 학습 목표와 태스크 설정
     7. 주말에는 복습과 실습 프로젝트 포함
     8. 공고 마감일 전 준비 완료되도록 일정 조정
+    9. 날짜는 오늘({current_date.strftime('%Y-%m-%d')})부터 시작하여 {days}일간 설정
     
 출력 형식]
     다음 JSON 형태로 응답해주세요:
@@ -205,7 +209,7 @@ async def generate_schedule_from_favorites(
         target_skills": {json.dumps(top_skills, ensure_ascii=False)},
     "schedule":{{
         day1
-               date": "2025-01-01",
+               date": "{current_date.strftime('%Y-%m-%d')}",
                 goals": ["목표1", "목표2"],
          tasks                   {{
                       title": "태스크 제목",
@@ -271,6 +275,10 @@ def create_fallback_schedule(
 ) -> Dict[str, Any]:
     """LLM 응답 실패 시 기본 일정 생성"""
     
+    # 현재 날짜부터 시작
+    from datetime import datetime, timedelta
+    start_date = datetime.now()
+    
     schedule = []
     for i in range(days):
         day_tasks = []
@@ -328,7 +336,7 @@ def create_fallback_schedule(
         
         schedule.append({
             "day": i + 1,
-            "date": f"2025-01-{i+1:02d}",
+            "date": (start_date + timedelta(days=i)).strftime("%Y-%m-%d"),
             "goals": [f"Day {i + 1} 학습 목표 달성"],
             "tasks": day_tasks,
             "notes": "꾸준한 학습과 실습이 중요합니다."
@@ -353,7 +361,7 @@ def create_fallback_schedule(
             days_remaining = (deadline - datetime.now()).days
             job_deadlines.append({
                 "job_title": job['title'],
-                "company": job['company'],
+                "company": job['company'],  # get_user_favorites에서 이미 company_name으로 설정됨
                 "deadline": deadline.strftime("%Y-%m-%d"),
                 "days_remaining": max(0, days_remaining)
             })
@@ -377,6 +385,9 @@ async def generate_todo_list(
     """
     사용자가 찜한 로드맵/공고 정보, 그리고 직무별 갭 분석을 기반으로 맞춤 일정을 생성합니다.
     
+    - 기존 todo_list가 있으면 새로운 일정으로 덮어씁니다.
+    - 새로운 일정은 사용자의 찜한 로드맵, 공고, 갭 분석 결과를 종합하여 생성됩니다.
+    
     Args:
         job_title: 목표 직무명
         days: 학습 기간 (일)
@@ -392,7 +403,12 @@ async def generate_todo_list(
         # 일정 생성
         schedule_data = await generate_schedule_from_favorites(current_user, job_title, days, db)
         
-        # 사용자 모델에 todo_list 저장 (JSON 형태로 저장)
+        # 기존 todo_list 확인
+        existing_todo = getattr(current_user, 'todo_list', None)
+        if existing_todo:
+            app_logger.info(f"사용자 {current_user.id}의 기존 todo-list를 새로운 일정으로 덮어씁니다.")
+        
+        # 사용자 모델에 todo_list 저장 (JSON 형태로 저장) - 기존 데이터 덮어쓰기
         setattr(current_user, 'todo_list', schedule_data)
         db.commit()
         

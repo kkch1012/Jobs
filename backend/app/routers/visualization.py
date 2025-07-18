@@ -68,17 +68,16 @@ def weekly_skill_frequency(
         JobPost.job_required_skill_id == job_role_id
     ).all()
 
-    # 3. 주별로 기술 키워드 카운트 (연속 주차 사용)
+    # 3. 주별로 기술 키워드 카운트 (ISO 주차 사용)
     from collections import Counter, defaultdict
     from datetime import datetime
     week_skill_counter = defaultdict(Counter)
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
         
-        # 연속 주차 계산 (2020년 1월 1일부터 시작)
-        base_date = datetime(2020, 1, 1)
-        days_diff = (posting_date - base_date).days
-        week_number = (days_diff // 7) + 1  # 1부터 시작하는 연속 주차
+        # ISO 주차 계산
+        week_number = posting_date.isocalendar()[1]  # ISO 주차
+        posting_date_only = posting_date.date()  # 날짜만 추출
         
         skills = []
         
@@ -103,14 +102,14 @@ def weekly_skill_frequency(
                     skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
         
         if skills:
-            week_skill_counter[week_number].update(skills)
+            week_skill_counter[(week_number, posting_date_only)].update(skills)
 
     # 4. 결과 응답
     response = []
-    for week_day, counter in week_skill_counter.items():
+    for (week, date_val), counter in week_skill_counter.items():
         for skill, count in counter.items():
             response.append(WeeklySkillStat(
-                week_day=week_day, skill=skill, count=count
+                week=week, date=date_val, skill=skill, count=count
             ))
     # count 기준 내림차순 정렬
     response = sorted(response, key=lambda x: x.count, reverse=True)
@@ -161,12 +160,9 @@ async def resume_vs_job_skill_trend(
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
         
-        # 주차.요일 계산 (2020년 1월 1일부터 시작)
-        base_date = datetime(2020, 1, 1)
-        days_diff = (posting_date - base_date).days
-        week_number = (days_diff // 7) + 1  # 1부터 시작하는 연속 주차
-        day_of_week = posting_date.isoweekday()  # 월요일=1, 일요일=7
-        week_day = f"{week_number}.{day_of_week}"
+        # ISO 주차와 날짜 계산
+        week_number = posting_date.isocalendar()[1]  # ISO 주차
+        posting_date_only = posting_date.date()  # 날짜만 추출
         
         skills = []
         
@@ -197,14 +193,14 @@ async def resume_vs_job_skill_trend(
                 if len(skill) > 500:
                     skill = skill[:497] + "..."  # 500자로 제한
                 limited_skills.append(skill)
-            week_skill_counter[week_day].update(limited_skills)
+            week_skill_counter[(week_number, posting_date_only)].update(limited_skills)
     # 3. 강점/약점 비교 및 응답 생성
     response = []
-    for week_day, counter in week_skill_counter.items():
+    for (week, date_val), counter in week_skill_counter.items():
         for skill, count in counter.items():
             status = "강점" if skill in my_skill_set else "약점"
             response.append(ResumeSkillComparison(
-                skill=skill, count=count, status=status, week_day=week_day
+                skill=skill, count=count, status=status, week=week, date=date_val
             ))
     return response
 
@@ -272,7 +268,8 @@ weekly_skill_stats 테이블에서 스킬명을 검색하여 해당 스킬의 �
     "count": 15,
     "job_name": "백엔드 개발자",
     "field_type": "tech_stack",
-    "week_day": "290.1"
+    "week": 29,
+    "date": "2025-01-15"
   }
 ]
 ```
@@ -292,7 +289,8 @@ def skill_search(
             WeeklySkillStatModel.skill,
             WeeklySkillStatModel.count,
             WeeklySkillStatModel.field_type,
-            WeeklySkillStatModel.week_day,
+            WeeklySkillStatModel.week,
+            WeeklySkillStatModel.date,
             JobRequiredSkill.job_name
         ).join(
             JobRequiredSkill,
@@ -312,7 +310,8 @@ def skill_search(
                 "count": stat.count,
                 "job_name": stat.job_name,
                 "field_type": stat.field_type,
-                "week_day": stat.week_day
+                "week": stat.week,
+                "date": stat.date.isoformat() if stat.date else None
             })
         
         return result
@@ -331,14 +330,15 @@ def skill_search(
 - 갭 분석을 통해 부족한 스킬을 파악
 - 트렌드 스킬과 사용자 스킬을 비교하여 점수 계산
 - 점수가 높은 로드맵을 우선적으로 추천
-- limit 파라미터로 추천 개수 조절 가능 (기본값: 10개)
+- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)
+- 부트캠프 limit개 + 강의 limit개를 반환
 - type 파라미터로 부트캠프/강의 필터링 가능
 """,
     response_model=List[Dict[str, Any]]
 )
 async def get_roadmap_recommendations_endpoint(
     category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
-    limit: int = Query(10, description="추천받을 로드맵 개수 (최대 20개)"),
+    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),
     type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -392,6 +392,8 @@ async def get_roadmap_recommendations_endpoint(
 - 갭 분석 결과 텍스트를 직접 입력
 - 별도의 갭 분석 과정 없이 바로 로드맵 추천
 - 기존 갭 분석 결과를 재활용할 때 유용
+- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)
+- 부트캠프 limit개 + 강의 limit개를 반환
 - type 파라미터로 부트캠프/강의 필터링 가능
 """,
     response_model=List[Dict[str, Any]]
@@ -399,7 +401,7 @@ async def get_roadmap_recommendations_endpoint(
 async def get_roadmap_recommendations_direct(
     category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
     gap_result_text: str = Query(..., description="갭 분석 결과 텍스트"),
-    limit: int = Query(10, description="추천받을 로드맵 개수 (최대 20개)"),
+    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),
     type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

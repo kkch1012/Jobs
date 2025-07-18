@@ -1,8 +1,10 @@
 from pydantic import BaseModel
 from typing import List
+from datetime import date
 
 class WeeklySkillStat(BaseModel):
-    week_day: str
+    week: int
+    date: date
     skill: str
     count: int
 
@@ -12,8 +14,9 @@ class WeeklySkillStat(BaseModel):
 class ResumeSkillComparison(BaseModel):
     skill: str
     count: int
-    status: str  # '강점' or '약점'
-    week_day: str
+    status: str
+    week: int
+    date: date
 
     class Config:
         from_attributes = True 
