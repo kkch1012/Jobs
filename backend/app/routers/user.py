@@ -128,7 +128,9 @@ def update_resume(
     
     # 이력서 업데이트 후 유사도 점수 자동 재계산
     try:
-        auto_compute_user_similarity(current_user, db)
+        from app.models.job_post import JobPost
+        job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+        auto_compute_user_similarity(current_user, db, job_posts)
     except Exception as e:
         # 유사도 계산 실패해도 이력서 업데이트는 성공으로 처리
         print(f"유사도 자동 계산 실패: {str(e)}")
