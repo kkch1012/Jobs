@@ -6,11 +6,6 @@ import httpx
 import json
 from datetime import datetime
 import asyncio
-import sys
-import os
-
-# 프로젝트 루트를 Python 경로에 추가
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.utils.text_utils import clean_markdown_text
 
 # MCP 서버 설정

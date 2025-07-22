@@ -1,6 +1,6 @@
 """
 FastAPI 애플리케이션 내 스케줄러 서비스
-매일 아침 8시에 유사도 계산 배치 작업을 실행합니다.
+매일 아침 8시에 유사도 계산 배치 작업과 일간 스킬 통계 생성을 실행합니다.
 """
 
 import asyncio
@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.services.similarity_scores import async_auto_compute_all_users_similarity
+from app.services.weekly_stats_service import WeeklyStatsService
 from app.utils.logger import similarity_logger
 
 APSCHEDULER_AVAILABLE = True
@@ -46,6 +47,57 @@ async def run_similarity_batch_job():
     except Exception as e:
         similarity_logger.error(f"스케줄된 배치 작업 실행 중 오류: {str(e)}")
 
+async def run_daily_stats_job():
+    """매일 아침 8시에 실행되는 일간 스킬 통계 생성 작업"""
+    try:
+        similarity_logger.info("스케줄된 일간 스킬 통계 생성 작업 시작")
+        
+        # 새로운 DB 세션 생성
+        db = SessionLocal()
+        try:
+            # 모든 필드 타입에 대해 일간 통계 생성
+            field_types = ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"]
+            total_stats_created = 0
+            
+            for field_type in field_types:
+                try:
+                    similarity_logger.info(f"필드 타입 '{field_type}' 일간 통계 생성 시작")
+                    result = WeeklyStatsService.generate_weekly_stats(db, field_type)
+                    
+                    if result["success"]:
+                        stats_created = result['total_stats_created']
+                        total_stats_created += stats_created
+                        similarity_logger.info(f"필드 타입 '{field_type}' 일간 통계 생성 완료: {stats_created}개")
+                    else:
+                        similarity_logger.error(f"필드 타입 '{field_type}' 일간 통계 생성 실패: {result['error']}")
+                        
+                except Exception as e:
+                    similarity_logger.error(f"필드 타입 '{field_type}' 일간 통계 생성 중 오류: {str(e)}")
+            
+            similarity_logger.info(f"스케줄된 일간 통계 생성 작업 완료: 총 {total_stats_created}개 통계 생성")
+                        
+        finally:
+            db.close()
+            
+    except Exception as e:
+        similarity_logger.error(f"스케줄된 일간 통계 생성 작업 실행 중 오류: {str(e)}")
+
+async def run_daily_batch_jobs():
+    """매일 아침 8시에 실행되는 모든 배치 작업 (유사도 계산 + 일간 통계 생성)"""
+    try:
+        similarity_logger.info("매일 아침 배치 작업 시작")
+        
+        # 1. 유사도 계산 실행
+        await run_similarity_batch_job()
+        
+        # 2. 일간 스킬 통계 생성 실행
+        await run_daily_stats_job()
+        
+        similarity_logger.info("매일 아침 배치 작업 완료")
+        
+    except Exception as e:
+        similarity_logger.error(f"매일 아침 배치 작업 실행 중 오류: {str(e)}")
+
 def start_scheduler():
     """스케줄러 시작"""
     if not APSCHEDULER_AVAILABLE:
@@ -53,18 +105,18 @@ def start_scheduler():
         return
         
     try:
-        # 매일 아침 8시에 유사도 계산 배치 작업 실행
+        # 매일 아침 8시에 통합 배치 작업 실행 (유사도 계산 + 일간 통계 생성)
         scheduler.add_job(
-            run_similarity_batch_job,
-            CronTrigger(hour=8, minute=0),  # 매일 아침8시
-            id='similarity_batch_job',
-            name='유사도 계산 배치 작업',
+            run_daily_batch_jobs,
+            CronTrigger(hour=8, minute=0),  # 매일 아침 8시
+            id='daily_batch_jobs',
+            name='매일 아침 배치 작업 (유사도 계산 + 일간 통계 생성)',
             replace_existing=True
         )
         
         # 스케줄러 시작
         scheduler.start()
-        similarity_logger.info("스케줄러가 시작되었습니다. 매일 아침8 유사도 계산이 실행됩니다.")
+        similarity_logger.info("스케줄러가 시작되었습니다. 매일 아침 8시에 유사도 계산과 일간 통계 생성이 실행됩니다.")
         
     except Exception as e:
         similarity_logger.error(f"스케줄러 시작 실패: {str(e)}")

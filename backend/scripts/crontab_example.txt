@@ -1,0 +1,30 @@
+# 크론탭 설정 예시
+# 매일 아침 8시에 유사도 계산 및 일간 스킬 통계 생성 배치 스크립트 실행
+
+# 크론탭 편집: crontab -e
+# 아래 라인 추가:
+
+# 매일 아침 8시에 유사도 계산 배치 실행 (기존 방식)
+0 8 * * * cd /path/to/your/project/backend && python scripts/run_similarity_batch.py >> /var/log/similarity_batch.log 2>&1
+
+# 또는 환경변수와 함께 실행
+0 8 * * * cd /path/to/your/project/backend && /path/to/venv/bin/python scripts/run_similarity_batch.py >> /var/log/similarity_batch.log 2>&1
+
+# 주의: FastAPI 애플리케이션 내장 스케줄러 사용 시 (권장)
+# 위의 크론탭 설정은 필요하지 않습니다.
+# FastAPI 애플리케이션이 시작될 때 자동으로 스케줄러가 시작되어
+# 매일 아침 8시에 유사도 계산과 일간 스킬 통계 생성을 자동으로 실행합니다.
+
+# 로그 확인
+# tail -f /var/log/similarity_batch.log
+
+# 크론탭 확인
+# crontab -l
+
+# 크론탭 서비스 상태 확인 (Linux)
+# sudo systemctl status cron
+# sudo systemctl enable cron
+# sudo systemctl start cron
+
+# FastAPI 스케줄러 상태 확인 (API 엔드포인트)
+# GET /scheduler/status 

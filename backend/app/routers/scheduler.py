@@ -74,4 +74,95 @@ def run_similarity_batch_manual(
             db.close()
             
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"배치 작업 실행 실패: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"배치 작업 실행 실패: {str(e)}")
+
+@router.post(
+    "/run-daily-stats",
+    summary="일간 스킬 통계 생성 작업 수동 실행",
+    description="매일 아침 8시에 자동으로 실행되는 일간 스킬 통계 생성 작업을 수동으로 실행합니다."
+)
+def run_daily_stats_manual(
+    current_user: User = Depends(get_current_user)
+):
+    """일간 스킬 통계 생성 작업 수동 실행"""
+    # 관리자 권한 확인 (필요시)
+    # if not current_user.is_admin:
+    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
+    
+    try:
+        from app.services.weekly_stats_service import WeeklyStatsService
+        from app.database import get_db
+        from sqlalchemy.orm import Session
+        
+        db = next(get_db())
+        try:
+            # 모든 필드 타입에 대해 일간 통계 생성
+            field_types = ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"]
+            total_results = {}
+            total_stats_created = 0
+            
+            for field_type in field_types:
+                result = WeeklyStatsService.generate_weekly_stats(db, field_type)
+                total_results[field_type] = result
+                if result["success"]:
+                    total_stats_created += result['total_stats_created']
+            
+            return {
+                "message": f"일간 스킬 통계 생성 작업이 완료되었습니다. 총 {total_stats_created}개 통계 생성",
+                "total_stats_created": total_stats_created,
+                "results": total_results
+            }
+        finally:
+            db.close()
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"일간 통계 생성 작업 실행 실패: {str(e)}")
+
+@router.post(
+    "/run-daily-batch",
+    summary="매일 아침 배치 작업 수동 실행",
+    description="매일 아침 8시에 자동으로 실행되는 모든 배치 작업(유사도 계산 + 일간 통계 생성)을 수동으로 실행합니다."
+)
+def run_daily_batch_manual(
+    current_user: User = Depends(get_current_user)
+):
+    """매일 아침 배치 작업 수동 실행"""
+    # 관리자 권한 확인 (필요시)
+    # if not current_user.is_admin:
+    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
+    
+    try:
+        from app.services.similarity_scores import auto_compute_all_users_similarity
+        from app.services.weekly_stats_service import WeeklyStatsService
+        from app.database import get_db
+        from sqlalchemy.orm import Session
+        
+        db = next(get_db())
+        try:
+            # 1. 유사도 계산
+            similarity_results = auto_compute_all_users_similarity(db)
+            
+            # 2. 일간 통계 생성
+            field_types = ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"]
+            stats_results = {}
+            total_stats_created = 0
+            
+            for field_type in field_types:
+                result = WeeklyStatsService.generate_weekly_stats(db, field_type)
+                stats_results[field_type] = result
+                if result["success"]:
+                    total_stats_created += result['total_stats_created']
+            
+            return {
+                "message": "매일 아침 배치 작업이 완료되었습니다.",
+                "similarity_results": similarity_results,
+                "stats_results": {
+                    "total_stats_created": total_stats_created,
+                    "details": stats_results
+                }
+            }
+        finally:
+            db.close()
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"매일 아침 배치 작업 실행 실패: {str(e)}") 
