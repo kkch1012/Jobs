@@ -65,7 +65,7 @@ python run_servers.py
 ```bash
 # 터미널 1: MCP 서버 실행
 cd backend
-python mcp_server.py
+python -m app.services.mcp_server
 
 # 터미널 2: FastAPI 서버 실행
 cd backend

@@ -48,7 +48,10 @@ backend/
 │   ├── schemas/          # Pydantic 스키마
 │   ├── database/         # 데이터베이스 설정
 │   └── utils/            # 유틸리티
-├── run_similarity_batch.py  # 독립 배치 스크립트
+├── scripts/                 # 스크립트 파일들
+│   ├── run_similarity_batch.py  # 독립 배치 스크립트
+│   ├── test_external_mcp.py     # MCP 테스트 스크립트
+│   └── crontab_example.txt      # 크론탭 설정 예시
 ├── requirements.txt      # 의존성
 └── .env.example         # 환경 변수 예시
 ```
@@ -99,8 +102,8 @@ uvicorn app.main:app --reload
 
 ### 배치 작업 설정
 - **FastAPI 내장 스케줄러**: 애플리케이션과 함께 실행
-- **독립 배치 스크립트**: `python run_similarity_batch.py`
-- **크론탭 설정**: `crontab_example.txt` 참조
+- **독립 배치 스크립트**: `python scripts/run_similarity_batch.py`
+- **크론탭 설정**: `scripts/crontab_example.txt` 참조
 
 ## 🔧 개발 가이드
 

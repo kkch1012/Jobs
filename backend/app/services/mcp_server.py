@@ -617,7 +617,7 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "mcp_server:app",
+        "app.services.mcp_server:app",
         host=MCP_SERVER_HOST,
         port=MCP_SERVER_PORT,
         reload=True

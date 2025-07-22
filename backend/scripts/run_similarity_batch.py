@@ -10,7 +10,7 @@ from datetime import datetime
 import logging
 
 # 프로젝트 루트 디렉토리를 Python 경로에 추가
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import SessionLocal
 from app.services.similarity_scores import auto_compute_all_users_similarity
