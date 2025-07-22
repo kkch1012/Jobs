@@ -207,4 +207,37 @@ async def update_my_resume_via_mcp(
         return ResumeUpdateResponse(message=result.get("message", "업데이트 완료"))
     except Exception as e:
         logger.error(f"MCP 이력서 업데이트 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"이력서 업데이트 실패: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"이력서 업데이트 실패: {str(e)}")
+
+@router.post("/page-move", summary="MCP를 통한 페이지 이동", description="MCP 서버를 통해 사용자 의도에 따른 페이지 이동을 처리합니다.")
+async def page_move_via_mcp(
+    user_intent: str,
+    current_page: Optional[str] = None,
+    additional_context: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """MCP 서버를 통해 페이지 이동을 처리합니다."""
+    try:
+        auth_token = f"Bearer user_{current_user.id}"
+        
+        arguments = {
+            "user_intent": user_intent,
+            "current_page": current_page,
+            "additional_context": additional_context
+        }
+        
+        result = await mcp_client.call_tool(
+            "page_move",
+            arguments,
+            auth_token
+        )
+        
+        return {
+            "target_page": result.get("target_page", "home"),
+            "page_data": result.get("page_data", {}),
+            "message": result.get("message", ""),
+            "action": "page_move"
+        }
+    except Exception as e:
+        logger.error(f"MCP 페이지 이동 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"페이지 이동 실패: {str(e)}") 

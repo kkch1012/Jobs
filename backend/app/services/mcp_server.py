@@ -281,6 +281,28 @@ AVAILABLE_TOOLS = {
                 "total": {"type": "integer"}
             }
         }
+    ),
+    "page_move": MCPTool(
+        name="page_move",
+        description="사용자 요청에 따라 적절한 페이지로 이동합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "user_intent": {"type": "string", "description": "사용자의 의도 (예: 채용공고 보기, 이력서 수정, 추천 받기)"},
+                "current_page": {"type": "string", "description": "현재 페이지 (선택사항)"},
+                "additional_context": {"type": "string", "description": "추가 컨텍스트 정보 (선택사항)"}
+            },
+            "required": ["user_intent"]
+        },
+        outputSchema={
+            "type": "object",
+            "properties": {
+                "target_page": {"type": "string", "description": "이동할 페이지명"},
+                "page_data": {"type": "object", "description": "페이지에 필요한 데이터"},
+                "message": {"type": "string", "description": "페이지 이동 안내 메시지"},
+                "action": {"type": "string", "description": "수행할 액션 (page_move)"}
+            }
+        }
     )
 }
 
@@ -390,7 +412,8 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "skill_search": "/visualization/skill_search",
             "roadmap_recommendations": "/visualization/roadmap_recommendations",
             "roadmap_recommendations_direct": "/visualization/roadmap_recommendations/direct",
-            "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend"
+            "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend",
+            "page_move": "/mcp/page-move"
         }
         
         endpoint = endpoint_mapping.get(tool_name)
@@ -513,6 +536,64 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                     "text": json.dumps(result, ensure_ascii=False)
                 }
             ])
+        elif tool_name == "page_move":
+            # 페이지 이동 로직 처리
+            arguments = request.arguments
+            user_intent = arguments.get("user_intent", "")
+            current_page = arguments.get("current_page", "")
+            
+            # 사용자 의도에 따른 페이지 결정
+            page_mapping = {
+                "채용공고": "job_posts",
+                "구인": "job_posts", 
+                "일자리": "job_posts",
+                "이력서": "resume",
+                "프로필": "resume",
+                "추천": "recommendations",
+                "맞춤": "recommendations",
+                "자격증": "certificates",
+                "기술": "skills",
+                "로드맵": "roadmaps",
+                "학습": "roadmaps",
+                "분석": "analysis",
+                "통계": "statistics",
+                "시각화": "visualization"
+            }
+            
+            target_page = "home"  # 기본값
+            for keyword, page in page_mapping.items():
+                if keyword in user_intent:
+                    target_page = page
+                    break
+            
+            # 페이지별 필요한 데이터 수집
+            page_data = {}
+            if target_page == "job_posts":
+                # 채용공고 목록 데이터
+                job_data = await fastapi_client.call_api("/job_posts/", {"limit": 10}, headers=headers)
+                page_data = {"jobs": job_data}
+            elif target_page == "resume":
+                # 이력서 데이터
+                resume_data = await fastapi_client.call_api("/users/me/resume", headers=headers)
+                page_data = {"resume": resume_data}
+            elif target_page == "recommendations":
+                # 추천 데이터
+                recommend_data = await fastapi_client.call_api("/recommend/jobs", headers=headers)
+                page_data = {"recommendations": recommend_data}
+            
+            result = {
+                "target_page": target_page,
+                "page_data": page_data,
+                "message": f"'{user_intent}' 요청에 따라 {target_page} 페이지로 이동합니다.",
+                "action": "page_move"
+            }
+            
+            return ToolCallResponse(content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(result, ensure_ascii=False)
+                }
+            ])
         else:
             # GET 요청으로 처리
             result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)
@@ -613,6 +694,13 @@ async def chat_with_mcp(request: MCPRequest):
                     answer = clean_markdown_text(api_result["recommendation"])
                 else:
                     answer = "채용공고 추천을 받을 수 없습니다."
+            elif tool_name == "page_move":
+                if isinstance(api_result, dict) and "target_page" in api_result:
+                    target_page = api_result["target_page"]
+                    message = api_result.get("message", "")
+                    answer = f"{message}\n\n이동할 페이지: {target_page}"
+                else:
+                    answer = "페이지 이동을 처리할 수 없습니다."
             elif tool_name in ["job_posts", "certificates", "skills", "roadmaps"]:
                 if isinstance(api_result, list) and len(api_result) > 0:
                     answer = f"{tool_name.replace('_', ' ').title()}를 {len(api_result)}개 찾았습니다!"
