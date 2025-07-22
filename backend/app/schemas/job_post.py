@@ -10,6 +10,7 @@ class JobPostBase(BaseModel):
     address: Optional[str] = None
     posting_date: datetime
     deadline: Optional[datetime] = None
+    is_expired: Optional[bool] = False  # 공고 만료 여부
     similarity: Optional[float] = None
 
     class Config:

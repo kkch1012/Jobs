@@ -59,6 +59,10 @@ def read_job_posts(
 
         # 동적 필터링
         filters = []
+        
+        # 기본 필터: 만료되지 않은 공고만 조회
+        filters.append(or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False)))
+        
         if company_name:
             filters.append(
                 or_(
@@ -114,7 +118,12 @@ def read_job_posts(
 )
 def get_unique_company_names(db: Session = Depends(get_db)):
     try:
-        names = db.query(JobPost.company_name).distinct().filter(JobPost.company_name.isnot(None)).all()
+        names = db.query(JobPost.company_name).distinct().filter(
+            and_(
+                JobPost.company_name.isnot(None),
+                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            )
+        ).all()
         result = [n[0] for n in names if n[0]]
         app_logger.info(f"회사명 유니크 리스트 조회 완료: {len(result)}건")
         return result
@@ -130,7 +139,12 @@ def get_unique_company_names(db: Session = Depends(get_db)):
 )
 def get_unique_applicant_types(db: Session = Depends(get_db)):
     try:
-        types = db.query(JobPost.applicant_type).distinct().filter(JobPost.applicant_type.isnot(None)).all()
+        types = db.query(JobPost.applicant_type).distinct().filter(
+            and_(
+                JobPost.applicant_type.isnot(None),
+                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            )
+        ).all()
         result = [t[0] for t in types if t[0]]
         app_logger.info(f"지원자격 유니크 리스트 조회 완료: {len(result)}건")
         return result
@@ -146,7 +160,12 @@ def get_unique_applicant_types(db: Session = Depends(get_db)):
 )
 def get_unique_employment_types(db: Session = Depends(get_db)):
     try:
-        types = db.query(JobPost.employment_type).distinct().filter(JobPost.employment_type.isnot(None)).all()
+        types = db.query(JobPost.employment_type).distinct().filter(
+            and_(
+                JobPost.employment_type.isnot(None),
+                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            )
+        ).all()
         result = [t[0] for t in types if t[0]]
         app_logger.info(f"고용형태 유니크 리스트 조회 완료: {len(result)}건")
         return result
@@ -162,7 +181,12 @@ def get_unique_employment_types(db: Session = Depends(get_db)):
 )
 def get_unique_tech_stacks(db: Session = Depends(get_db)):
     try:
-        stacks = db.query(JobPost.tech_stack).distinct().filter(JobPost.tech_stack.isnot(None)).all()
+        stacks = db.query(JobPost.tech_stack).distinct().filter(
+            and_(
+                JobPost.tech_stack.isnot(None),
+                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            )
+        ).all()
         tech_set = set()
         for s in stacks:
             if s[0]:
@@ -203,10 +227,20 @@ def get_job_post_detail(
                     JobPost.id == UserSimilarity.job_post_id,
                     UserSimilarity.user_id == current_user.id
                 )
-            ).filter(JobPost.id == job_id)
+            ).filter(
+                and_(
+                    JobPost.id == job_id,
+                    or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+                )
+            )
         else:
             # 비로그인 사용자의 경우 유사도 없이 조회
-            query = db.query(JobPost, null().label('similarity')).filter(JobPost.id == job_id)
+            query = db.query(JobPost, null().label('similarity')).filter(
+                and_(
+                    JobPost.id == job_id,
+                    or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+                )
+            )
 
         # 관계 데이터 미리 로드
         query = query.options(

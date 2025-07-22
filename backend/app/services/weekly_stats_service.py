@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.weekly_skill_stat import WeeklySkillStat
@@ -167,11 +167,14 @@ class WeeklyStatsService:
         Returns:
             생성된 통계 개수
         """
-        # 1. 해당 직무의 모든 채용공고 조회 (실행 시점 기준으로 통계 생성)
+        # 1. 해당 직무의 모든 채용공고 조회 (실행 시점 기준으로 통계 생성, 만료되지 않은 공고만)
         posts = db.query(
             getattr(JobPost, field_type)
         ).filter(
-            JobPost.job_required_skill_id == job_role.id
+            and_(
+                JobPost.job_required_skill_id == job_role.id,
+                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            )
         ).all()
         
         # 데이터가 없으면 건너뛰기

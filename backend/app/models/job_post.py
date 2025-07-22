@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -22,6 +22,7 @@ class JobPost(Base):
     applicant_type = Column(Text, nullable=False)  # 지원 자격
     posting_date = Column(DateTime(timezone=True), nullable=False)  # 공고 게시일 (한국 시간대)
     deadline = Column(DateTime, nullable=True)  # 공고 마감일
+    is_expired = Column(Boolean, nullable=True, default=False)  # 공고 만료 여부 (기본값: False)
     main_tasks = Column(Text, nullable=True)  # 주요 업무
     qualifications = Column(Text, nullable=True)  # 자격 요건
     preferences = Column(Text, nullable=True)  # 우대 사항

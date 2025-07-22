@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
 from app.database import get_db
@@ -60,12 +60,15 @@ def weekly_skill_frequency(
         raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
     job_role_id = job_role.id
 
-    # 2. 해당 직무id로 JobPost 필터링 & 주별 집계
+    # 2. 해당 직무id로 JobPost 필터링 & 주별 집계 (만료되지 않은 공고만)
     posts = db.query(
         JobPost.posting_date,
         getattr(JobPost, field)
     ).filter(
-        JobPost.job_required_skill_id == job_role_id
+        and_(
+            JobPost.job_required_skill_id == job_role_id,
+            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+        )
     ).all()
 
     # 3. 주별로 기술 키워드 카운트 (ISO 주차 사용)
@@ -152,7 +155,10 @@ async def resume_vs_job_skill_trend(
         JobPost.posting_date,
         getattr(JobPost, field)
     ).filter(
-        JobPost.job_required_skill_id == job_role_id
+        and_(
+            JobPost.job_required_skill_id == job_role_id,
+            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+        )
     ).all()
     from collections import Counter, defaultdict
     from datetime import datetime
@@ -284,7 +290,7 @@ def skill_search(
     weekly_skill_stats 테이블에서 스킬명을 검색합니다.
     """
     try:
-        # 스킬명으로 검색 (대소문자 구분 없이 부분 검색)
+        # 스킬명으로 검색 (대소문자 구분 없이 부분 검색, 만료되지 않은 공고 기반 통계만)
         stats = db.query(
             WeeklySkillStatModel.skill,
             WeeklySkillStatModel.count,
