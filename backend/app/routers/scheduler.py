@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.services.scheduler import get_scheduler_status, start_scheduler, stop_scheduler
-from app.utils.dependencies import get_current_user
+from app.utils.dependencies import get_current_user, get_optional_current_user
 from app.models.user import User
+from typing import Optional
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 
@@ -51,12 +52,9 @@ def stop():
     description="매일 아침 8시에 자동으로 실행되는 유사도 계산 배치 작업을 수동으로 실행합니다."
 )
 def run_similarity_batch_manual(
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """유사도 계산 배치 작업 수동 실행"""
-    # 관리자 권한 확인 (필요시)
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
     
     try:
         from app.services.similarity_scores import auto_compute_all_users_similarity
@@ -82,12 +80,9 @@ def run_similarity_batch_manual(
     description="매일 아침 8시에 자동으로 실행되는 일간 스킬 통계 생성 작업을 수동으로 실행합니다."
 )
 def run_daily_stats_manual(
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """일간 스킬 통계 생성 작업 수동 실행"""
-    # 관리자 권한 확인 (필요시)
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
     
     try:
         from app.services.weekly_stats_service import WeeklyStatsService
@@ -124,12 +119,9 @@ def run_daily_stats_manual(
     description="매일 아침 8시에 자동으로 실행되는 모든 배치 작업(유사도 계산 + 일간 통계 생성)을 수동으로 실행합니다."
 )
 def run_daily_batch_manual(
-    current_user: User = Depends(get_current_user)
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     """매일 아침 배치 작업 수동 실행"""
-    # 관리자 권한 확인 (필요시)
-    # if not current_user.is_admin:
-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")
     
     try:
         from app.services.similarity_scores import auto_compute_all_users_similarity

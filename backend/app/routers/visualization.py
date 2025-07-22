@@ -21,14 +21,15 @@ router = APIRouter(prefix="/visualization", tags=["Visualization"])
 @router.get(
     "/weekly_skill_frequency",
     operation_id="weekly_skill_frequency",
-    summary="직무별 주간 스킬 빈도 조회",
+    summary="직무별 주간 스킬 빈도 조회 (주차 범위 지정)",
     description="""
-선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 최근 채용공고에서 추출된 **기술/키워드의 주별 등장 빈도**를 집계하여 반환합니다.
+선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 지정된 주차 범위의 채용공고에서 추출된 **기술/키워드의 주별 등장 빈도**를 집계하여 반환합니다.
 
 - **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, qualifications, preferences, required_skills, preferred_skills
+- `weeks_back` 파라미터로 조회할 주차 범위를 지정할 수 있습니다.
 - 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
 - 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.
 
@@ -52,6 +53,7 @@ def weekly_skill_frequency(
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
+    weeks_back: int = Query(0, ge=0, le=52, description="몇 주 전까지 조회할지 (0: 현재 주차만, 1: 현재+이전 1주차, 최대 52주)"),
     db: Session = Depends(get_db)
 ):
     # 1. 직무명 → id 매핑
@@ -60,7 +62,15 @@ def weekly_skill_frequency(
         raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
     job_role_id = job_role.id
 
-    # 2. 해당 직무id로 JobPost 필터링 & 주별 집계 (만료되지 않은 공고만)
+    # 2. 현재 주차 계산
+    from datetime import datetime
+    import pytz
+    
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz)
+    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
+    
+    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)
     posts = db.query(
         JobPost.posting_date,
         getattr(JobPost, field)
@@ -71,49 +81,155 @@ def weekly_skill_frequency(
         )
     ).all()
 
-    # 3. 주별로 기술 키워드 카운트 (ISO 주차 사용)
-    from collections import Counter, defaultdict
-    from datetime import datetime
-    week_skill_counter = defaultdict(Counter)
+    # 4. 현재 주차의 기술 키워드 카운트
+    from collections import Counter
+    skill_counter = Counter()
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
         
-        # ISO 주차 계산
-        week_number = posting_date.isocalendar()[1]  # ISO 주차
-        posting_date_only = posting_date.date()  # 날짜만 추출
-        
-        skills = []
-        
-        # 필드 타입에 따른 처리
-        if field == "tech_stack":
-            # tech_stack은 문자열 필드
-            if isinstance(field_value, str) and field_value.strip():
-                skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-        else:
-            # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
-            if isinstance(field_value, list):
-                skills = [str(skill).strip() for skill in field_value if skill]
-            elif isinstance(field_value, str) and field_value.strip():
-                # JSON 문자열인 경우 파싱 시도
-                try:
-                    import json
-                    parsed = json.loads(field_value)
-                    if isinstance(parsed, list):
-                        skills = [str(skill).strip() for skill in parsed if skill]
-                except:
-                    # 파싱 실패 시 문자열로 처리
+        # 현재 주차의 공고만 처리
+        post_week = posting_date.isocalendar()[1]
+        if post_week == current_week:
+                        # 필드 타입에 따른 처리
+            if field == "tech_stack":
+                # tech_stack은 문자열 필드
+                if isinstance(field_value, str) and field_value.strip():
                     skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-        
-        if skills:
-            week_skill_counter[(week_number, posting_date_only)].update(skills)
+            else:
+                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
+                if isinstance(field_value, list):
+                    skills = [str(skill).strip() for skill in field_value if skill]
+                elif isinstance(field_value, str) and field_value.strip():
+                    # JSON 문자열인 경우 파싱 시도
+                    try:
+                        import json
+                        parsed = json.loads(field_value)
+                        if isinstance(parsed, list):
+                            skills = [str(skill).strip() for skill in parsed if skill]
+                    except:
+                        # 파싱 실패 시 문자열로 처리
+                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            
+            if skills:
+                skill_counter.update(skills)
 
-    # 4. 결과 응답
+    # 5. 결과 응답 (현재 주차만)
     response = []
-    for (week, date_val), counter in week_skill_counter.items():
-        for skill, count in counter.items():
-            response.append(WeeklySkillStat(
-                week=week, date=date_val, skill=skill, count=count
-            ))
+    for skill, count in skill_counter.items():
+        response.append(WeeklySkillStat(
+            week=current_week, 
+            date=current_date.date(), 
+            skill=skill, 
+            count=count
+        ))
+    # count 기준 내림차순 정렬
+    response = sorted(response, key=lambda x: x.count, reverse=True)
+    return response
+
+@router.get(
+    "/weekly_skill_frequency_current",
+    operation_id="weekly_skill_frequency_current",
+    summary="직무별 현재 주차 스킬 빈도 조회",
+    description="""
+선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, **현재 주차의 채용공고**에서 추출된 **기술/키워드의 등장 빈도**를 집계하여 반환합니다.
+
+- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
+- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
+    - tech_stack, qualifications, preferences, required_skills, preferred_skills
+- **현재 주차만** 조회하여 실시간 트렌드를 파악할 수 있습니다.
+- 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
+
+**응답 예시:**
+```json
+[
+  { "year": 2025, "week": 29, "skill": "Python", "count": 12 },
+  { "year": 2025, "week": 29, "skill": "SQL", "count": 7 },
+  { "year": 2025, "week": 29, "skill": "Java", "count": 5 }
+]
+""",
+    response_model=List[WeeklySkillStat]
+)
+def weekly_skill_frequency_current(
+    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),
+    field: str = Query(
+        "tech_stack",
+        enum=[
+            "tech_stack", "qualifications", "preferences",
+            "required_skills", "preferred_skills"
+        ],
+        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
+    ),
+    db: Session = Depends(get_db)
+):
+    # 1. 직무명 → id 매핑
+    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
+    if not job_role:
+        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
+    job_role_id = job_role.id
+
+    # 2. 현재 주차 계산
+    from datetime import datetime
+    import pytz
+    
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz)
+    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
+    
+    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)
+    posts = db.query(
+        JobPost.posting_date,
+        getattr(JobPost, field)
+    ).filter(
+        and_(
+            JobPost.job_required_skill_id == job_role_id,
+            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+        )
+    ).all()
+
+    # 4. 현재 주차의 기술 키워드 카운트
+    from collections import Counter
+    skill_counter = Counter()
+    for row in posts:
+        posting_date, field_value = row.posting_date, row[1]
+        
+        # 현재 주차의 공고만 처리
+        post_week = posting_date.isocalendar()[1]
+        if post_week == current_week:
+            skills = []
+            
+            # 필드 타입에 따른 처리
+            if field == "tech_stack":
+                # tech_stack은 문자열 필드
+                if isinstance(field_value, str) and field_value.strip():
+                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            else:
+                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
+                if isinstance(field_value, list):
+                    skills = [str(skill).strip() for skill in field_value if skill]
+                elif isinstance(field_value, str) and field_value.strip():
+                    # JSON 문자열인 경우 파싱 시도
+                    try:
+                        import json
+                        parsed = json.loads(field_value)
+                        if isinstance(parsed, list):
+                            skills = [str(skill).strip() for skill in parsed if skill]
+                    except:
+                        # 파싱 실패 시 문자열로 처리
+                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            
+            if skills:
+                skill_counter.update(skills)
+
+    # 5. 결과 응답 (현재 주차만)
+    response = []
+    for skill, count in skill_counter.items():
+        response.append(WeeklySkillStat(
+            week=current_week, 
+            date=current_date.date(), 
+            skill=skill, 
+            count=count
+        ))
     # count 기준 내림차순 정렬
     response = sorted(response, key=lambda x: x.count, reverse=True)
     return response
@@ -146,7 +262,12 @@ async def resume_vs_job_skill_trend(
         elif hasattr(us, 'skill_name'):
             my_skill_set.add(us.skill_name)
 
-    # 2. 직무별 주간 스킬 빈도 데이터 조회 (기존 함수 재활용)
+    # 2. 현재 주차 계산
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz)
+    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
+    
+    # 3. 직무별 현재 주차 스킬 빈도 데이터 조회
     job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
     if not job_role:
         raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
@@ -160,54 +281,50 @@ async def resume_vs_job_skill_trend(
             or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
         )
     ).all()
-    from collections import Counter, defaultdict
-    from datetime import datetime
-    week_skill_counter = defaultdict(Counter)
+    
+    from collections import Counter
+    skill_counter = Counter()
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
         
-        # ISO 주차와 날짜 계산
-        week_number = posting_date.isocalendar()[1]  # ISO 주차
-        posting_date_only = posting_date.date()  # 날짜만 추출
-        
-        skills = []
-        
-        # 필드 타입에 따른 처리
-        if field == "tech_stack":
-            # tech_stack은 문자열 필드
-            if isinstance(field_value, str) and field_value.strip():
-                skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-        else:
-            # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
-            if isinstance(field_value, list):
-                skills = [str(skill).strip() for skill in field_value if skill]
-            elif isinstance(field_value, str) and field_value.strip():
-                # JSON 문자열인 경우 파싱 시도
-                try:
-                    import json
-                    parsed = json.loads(field_value)
-                    if isinstance(parsed, list):
-                        skills = [str(skill).strip() for skill in parsed if skill]
-                except:
-                    # 파싱 실패 시 문자열로 처리
+        # 현재 주차의 공고만 처리
+        post_week = posting_date.isocalendar()[1]
+        if post_week == current_week:
+                        # 필드 타입에 따른 처리
+            if field == "tech_stack":
+                # tech_stack은 문자열 필드
+                if isinstance(field_value, str) and field_value.strip():
                     skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-        
-        # 스킬명 길이 제한 (500자)
-        if skills:
-            limited_skills = []
-            for skill in skills:
-                if len(skill) > 500:
-                    skill = skill[:497] + "..."  # 500자로 제한
-                limited_skills.append(skill)
-            week_skill_counter[(week_number, posting_date_only)].update(limited_skills)
-    # 3. 강점/약점 비교 및 응답 생성
+            else:
+                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
+                if isinstance(field_value, list):
+                    skills = [str(skill).strip() for skill in field_value if skill]
+                elif isinstance(field_value, str) and field_value.strip():
+                    # JSON 문자열인 경우 파싱 시도
+                    try:
+                        import json
+                        parsed = json.loads(field_value)
+                        if isinstance(parsed, list):
+                            skills = [str(skill).strip() for skill in parsed if skill]
+                    except:
+                        # 파싱 실패 시 문자열로 처리
+                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
+            
+            # 스킬명 길이 제한 (500자)
+            if skills:
+                limited_skills = []
+                for skill in skills:
+                    if len(skill) > 500:
+                        skill = skill[:497] + "..."  # 500자로 제한
+                    limited_skills.append(skill)
+                skill_counter.update(limited_skills)
+    # 4. 강점/약점 비교 및 응답 생성 (현재 주차만)
     response = []
-    for (week, date_val), counter in week_skill_counter.items():
-        for skill, count in counter.items():
-            status = "강점" if skill in my_skill_set else "약점"
-            response.append(ResumeSkillComparison(
-                skill=skill, count=count, status=status, week=week, date=date_val
-            ))
+    for skill, count in skill_counter.items():
+        status = "강점" if skill in my_skill_set else "약점"
+        response.append(ResumeSkillComparison(
+            skill=skill, count=count, status=status, week=current_week, date=current_date.date()
+        ))
     return response
 
 @router.get("/gap-analysis", response_class=JSONResponse,
