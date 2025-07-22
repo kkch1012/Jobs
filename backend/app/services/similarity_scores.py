@@ -177,16 +177,36 @@ def auto_compute_user_similarity(user: User, db: Session, job_posts: list) -> bo
             "education_status", "degree", "language_score",
             "desired_job", "working_year",
             "skills_with_proficiency", "certificates",
-            "latest_exp_name", "latest_exp_description"
+            "experiences_text"
         ]
         empty_values = {"", "None", "[]", "{}", "nan", "없음", "없어요", "없다", "null", "NULL"}
+
+        # 사용자 정보를 딕셔너리로 변환 (SQLAlchemy 객체의 __dict__ 대신)
+        user_dict = {
+            "name": user.name,
+            "gender": user.gender,
+            "university": user.university,
+            "major": user.major,
+            "gpa": getattr(user, "gpa", None),
+            "education_status": user.education_status,
+            "degree": user.degree,
+            "language_score": user.language_score,
+            "desired_job": user.desired_job,
+            "working_year": user.working_year,
+            "skills_with_proficiency": ', '.join([f"{s.skill.name}({s.proficiency})" for s in user.user_skills]),
+            "certificates": ', '.join([c.certificate.name for c in user.user_certificates]),
+            "experiences_text": " | ".join([
+                f"{exp.name}, {exp.period}, {exp.description}"
+                for exp in user.experiences
+            ]) if user.experiences else None
+        }
 
         scores = []
         for job in job_posts:
             job_vec = np.array(job.full_embedding)
             job_vec = job_vec / np.linalg.norm(job_vec) if np.linalg.norm(job_vec) > 0 else job_vec
             sim = cosine_similarity([user_vec], [job_vec])[0][0]
-            adjusted = adjust_similarity_score(sim, job.applicant_type, user.__dict__, used_cols, empty_values)
+            adjusted = adjust_similarity_score(sim, job.applicant_type, user_dict, used_cols, empty_values)
             # numpy 타입을 Python float로 변환
             adjusted_float = float(adjusted) if hasattr(adjusted, 'item') else adjusted
             scores.append((job.id, adjusted_float))
@@ -210,16 +230,36 @@ def compute_similarity_scores(user: User, job_posts: list) -> list:
         "education_status", "degree", "language_score",
         "desired_job", "working_year",
         "skills_with_proficiency", "certificates",
-        "latest_exp_name", "latest_exp_description"
+        "experiences_text"
     ]
     empty_values = {"", "None", "[]", "{}", "nan", "없음", "없어요", "없다", "null", "NULL"}
+
+    # 사용자 정보를 딕셔너리로 변환 (SQLAlchemy 객체의 __dict__ 대신)
+    user_dict = {
+        "name": user.name,
+        "gender": user.gender,
+        "university": user.university,
+        "major": user.major,
+        "gpa": getattr(user, "gpa", None),
+        "education_status": user.education_status,
+        "degree": user.degree,
+        "language_score": user.language_score,
+        "desired_job": user.desired_job,
+        "working_year": user.working_year,
+        "skills_with_proficiency": ', '.join([f"{s.skill.name}({s.proficiency})" for s in user.user_skills]),
+        "certificates": ', '.join([c.certificate.name for c in user.user_certificates]),
+        "experiences_text": " | ".join([
+            f"{exp.name}, {exp.period}, {exp.description}"
+            for exp in user.experiences
+        ]) if user.experiences else None
+    }
 
     results = []
     for job in job_posts:
         job_vec = np.array(job.full_embedding)
         job_vec = job_vec / np.linalg.norm(job_vec) if np.linalg.norm(job_vec) > 0 else job_vec
         sim = cosine_similarity([user_vec], [job_vec])[0][0]
-        adjusted = adjust_similarity_score(sim, job.applicant_type, user.__dict__, used_cols, empty_values)
+        adjusted = adjust_similarity_score(sim, job.applicant_type, user_dict, used_cols, empty_values)
         # numpy 타입을 Python float로 변환
         adjusted_float = float(adjusted) if hasattr(adjusted, 'item') else adjusted
         results.append((job.id, adjusted_float))

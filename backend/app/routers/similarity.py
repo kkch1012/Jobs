@@ -109,9 +109,9 @@ def get_user_similarity_scores(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        from app.services.similarity_scores import get_user_similarity_scores
+        from app.services.similarity_scores import get_user_similarity_scores as get_scores
         
-        similarities = get_user_similarity_scores(user_id, db, limit)
+        similarities = get_scores(user_id, db, limit)
         
         return {
             "user_id": user_id,
@@ -147,7 +147,7 @@ def get_top_job_ids(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        from app.services.similarity_scores import get_top_job_ids
+        from app.services.similarity_scores import get_top_job_ids as get_top_ids
         
         # 사용자 조회
         user = db.query(User).filter(User.id == user_id).first()
@@ -161,7 +161,7 @@ def get_top_job_ids(
             return {"user_id": user_id, "top_job_ids": [], "message": "계산할 채용공고가 없습니다."}
         
         # 상위 공고 ID 조회
-        top_job_ids = get_top_job_ids(user, job_posts, top_k)
+        top_job_ids = get_top_ids(user, job_posts, top_k)
         
         return {
             "user_id": user_id,
