@@ -4,7 +4,6 @@ from app.database import get_db
 from app.models.user import User
 from app.models.job_post import JobPost
 from app.services.recommender import recommend_jobs_for_user, get_top_n_jobs_with_scores, make_prompt, call_qwen_api
-
 from app.services.jobs_gap import recommend_job_for_user, get_job_recommendation_simple
 from app.utils.dependencies import get_current_user
 import os
@@ -232,8 +231,11 @@ def generate_job_explanations(
         llm_explanation = call_qwen_api(explanation_prompt, api_key)
         
         if llm_explanation:
+            # 마크다운 형식 제거
+            from app.utils.text_utils import clean_markdown_text
+            cleaned_explanation = clean_markdown_text(llm_explanation)
             return {
-                "explanations": llm_explanation,
+                "explanations": cleaned_explanation,
                 "user_id": current_user.id
             }
         else:

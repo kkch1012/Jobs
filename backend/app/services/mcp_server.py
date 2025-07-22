@@ -6,6 +6,12 @@ import httpx
 import json
 from datetime import datetime
 import asyncio
+import sys
+import os
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from app.utils.text_utils import clean_markdown_text
 
 # MCP 서버 설정
 MCP_SERVER_HOST = "localhost"
@@ -456,7 +462,7 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                         {
                             "type": "text",
                             "text": json.dumps({
-                                "msg": duplicate_message,
+                                "msg": clean_markdown_text(duplicate_message),
                                 "status": "duplicate",
                                 "current_data": current_resume
                             }, ensure_ascii=False)
@@ -551,7 +557,8 @@ async def chat_with_mcp(request: MCPRequest):
             # 도구별 응답 처리
             if tool_name == "gap_analysis":
                 if isinstance(api_result, dict) and "gap_result" in api_result:
-                    answer = f"갭 분석이 완료되었습니다.\n\n분석 결과:\n{api_result['gap_result']}\n\n부족한 스킬 Top 5:\n" + "\n".join([f"- {skill}" for skill in api_result.get('top_skills', [])])
+                    gap_result = clean_markdown_text(api_result['gap_result'])
+                    answer = f"갭 분석이 완료되었습니다.\n\n분석 결과:\n{gap_result}\n\n부족한 스킬 Top 5:\n" + "\n".join([f"• {skill}" for skill in api_result.get('top_skills', [])])
                 else:
                     answer = "갭 분석을 수행할 수 없습니다."
             elif tool_name == "skill_search":
@@ -581,7 +588,7 @@ async def chat_with_mcp(request: MCPRequest):
                     answer = "주간 스킬 빈도 데이터가 없습니다."
             elif tool_name == "job_recommendation":
                 if isinstance(api_result, dict) and "recommendation" in api_result:
-                    answer = api_result["recommendation"]
+                    answer = clean_markdown_text(api_result["recommendation"])
                 else:
                     answer = "채용공고 추천을 받을 수 없습니다."
             elif tool_name in ["job_posts", "certificates", "skills", "roadmaps"]:

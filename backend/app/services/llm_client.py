@@ -5,7 +5,7 @@ import logging
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 import anyio.to_thread
-import re
+from app.utils.text_utils import clean_markdown_text
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,9 @@ class OpenRouterClient:
 
         try:
             completion = await anyio.to_thread.run_sync(sync_call)
-            return completion.choices[0].message.content
+            content = completion.choices[0].message.content
+            # 마크다운 형식 제거 및 텍스트 정리
+            return clean_markdown_text(content)
         except Exception as e:
             logger.error(f"OpenRouter API 호출 중 오류: {str(e)}")
             return None

@@ -11,6 +11,7 @@ from typing import List
 import os
 import requests
 from app.utils.logger import recommender_logger
+from app.utils.text_utils import clean_markdown_text
 
 def get_top_n_jobs_with_scores(user: User, db: Session, n: int = 20) -> List[tuple[JobPost, float]]:
     """
@@ -168,7 +169,7 @@ def recommend_jobs_for_user(user: User, db: Session, api_key: str, top_n: int = 
 
     if llm_recommendation:
         recommender_logger.info("LLM 추천 생성 성공")
-        return llm_recommendation
+        return clean_markdown_text(llm_recommendation)
     else:
         recommender_logger.warning("LLM 추천 생성 실패. 대체 응답을 생성합니다.")
         fallback_message = (
@@ -178,6 +179,6 @@ def recommend_jobs_for_user(user: User, db: Session, api_key: str, top_n: int = 
         )
         # 유사도 점수와 함께 회사명과 직무명을 표시합니다.
         for job, similarity in top_jobs_with_sim[:5]:
-             fallback_message += f"✅ **{job.company_name} - {job.title}** (적합도: {similarity:.2f})\n"
+             fallback_message += f"• {job.company_name} - {job.title} (적합도: {similarity:.2f})\n"
 
         return fallback_message
