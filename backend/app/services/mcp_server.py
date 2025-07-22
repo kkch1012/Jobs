@@ -116,9 +116,10 @@ AVAILABLE_TOOLS = {
         inputSchema={
             "type": "object",
             "properties": {
-                "job_name": {"type": "string", "description": "직무명"},
-                "field": {"type": "string", "description": "분석 필드", "default": "tech_stack"}
-            }
+                "job_name": {"type": "string", "description": "직무명 (예: 백엔드 개발자)"},
+                "field": {"type": "string", "description": "분석 필드", "default": "tech_stack", "enum": ["tech_stack", "qualifications", "preferences", "required_skills", "preferred_skills"]}
+            },
+            "required": ["job_name"]
         },
         outputSchema={
             "type": "object",
@@ -148,13 +149,25 @@ AVAILABLE_TOOLS = {
         inputSchema={
             "type": "object",
             "properties": {
-                "resume_data": {"type": "object", "description": "수정할 이력서 데이터"}
+                "job_name": {"type": "string", "description": "희망직무 (예: 프론트엔드 개발자) - 기존 직무에 추가됨"},
+                "university": {"type": "string", "description": "대학교명"},
+                "major": {"type": "string", "description": "전공"},
+                "gpa": {"type": "string", "description": "학점 (예: 4.0, 3.5)"},
+                "education_status": {"type": "string", "description": "학적상태 (재학중/졸업/휴학)"},
+                "degree": {"type": "string", "description": "학위 (학사/석사/박사)"},
+                "language_score": {"type": "string", "description": "어학점수 (예: TOEIC 900, IELTS 7.0)"},
+                "working_year": {"type": "string", "description": "경력연차 (예: 3년, 신입)"},
+                "skills": {"type": "array", "items": {"type": "string"}, "description": "기술스택 목록"},
+                "certificates": {"type": "array", "items": {"type": "string"}, "description": "자격증 목록"},
+                "experience": {"type": "array", "items": {"type": "object"}, "description": "경험 목록"}
             }
         },
         outputSchema={
             "type": "object",
             "properties": {
-                "message": {"type": "string", "description": "수정 결과 메시지"}
+                "message": {"type": "string", "description": "수정 결과 메시지"},
+                "status": {"type": "string", "description": "상태 (success/duplicate/error)"},
+                "current_data": {"type": "object", "description": "현재 이력서 데이터 (중복 시)"}
             }
         }
     ),
@@ -393,32 +406,25 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             # update_resume의 경우 파라미터를 resume_data 구조로 변환
             arguments = request.arguments
             
-            # job_name이 있으면 desired_job으로 변환
+            # 모든 파라미터를 resume_data로 변환
             resume_data = {}
-            if "job_name" in arguments:
-                resume_data["desired_job"] = arguments["job_name"]
+            field_mapping = {
+                "job_name": "desired_job",
+                "university": "university",
+                "major": "major", 
+                "gpa": "gpa",
+                "education_status": "education_status",
+                "degree": "degree",
+                "language_score": "language_score",
+                "working_year": "working_year",
+                "skills": "skills",
+                "certificates": "certificates",
+                "experience": "experience"
+            }
             
-            # 다른 파라미터들도 추가 가능
-            if "university" in arguments:
-                resume_data["university"] = arguments["university"]
-            if "major" in arguments:
-                resume_data["major"] = arguments["major"]
-            if "gpa" in arguments:
-                resume_data["gpa"] = arguments["gpa"]
-            if "education_status" in arguments:
-                resume_data["education_status"] = arguments["education_status"]
-            if "degree" in arguments:
-                resume_data["degree"] = arguments["degree"]
-            if "language_score" in arguments:
-                resume_data["language_score"] = arguments["language_score"]
-            if "working_year" in arguments:
-                resume_data["working_year"] = arguments["working_year"]
-            if "skills" in arguments:
-                resume_data["skills"] = arguments["skills"]
-            if "certificates" in arguments:
-                resume_data["certificates"] = arguments["certificates"]
-            if "experience" in arguments:
-                resume_data["experience"] = arguments["experience"]
+            for arg_key, resume_key in field_mapping.items():
+                if arg_key in arguments and arguments[arg_key] is not None:
+                    resume_data[resume_key] = arguments[arg_key]
             
             # 1단계: 현재 이력서 조회
             try:
@@ -490,6 +496,23 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                         "text": json.dumps(result, ensure_ascii=False)
                     }
                 ])
+        elif tool_name == "visualization":
+            # visualization 도구는 job_name과 field 파라미터가 필요
+            arguments = request.arguments
+            if "job_name" not in arguments:
+                raise HTTPException(status_code=400, detail="visualization 도구는 job_name 파라미터가 필요합니다")
+            
+            # field 파라미터가 없으면 기본값 사용
+            if "field" not in arguments:
+                arguments["field"] = "tech_stack"
+            
+            result = await fastapi_client.call_api(endpoint, arguments, headers=headers)
+            return ToolCallResponse(content=[
+                {
+                    "type": "text",
+                    "text": json.dumps(result, ensure_ascii=False)
+                }
+            ])
         else:
             # GET 요청으로 처리
             result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)
@@ -578,9 +601,13 @@ async def chat_with_mcp(request: MCPRequest):
                     answer = "스킬 비교 결과가 없습니다."
             elif tool_name == "visualization":
                 if isinstance(api_result, list) and len(api_result) > 0:
-                    answer = f"주간 스킬 빈도 데이터를 {len(api_result)}개 찾았습니다."
+                    job_name = arguments.get('job_name', '해당 직무')
+                    field = arguments.get('field', 'tech_stack')
+                    answer = f"'{job_name}' 직무의 {field} 주간 스킬 빈도 데이터를 {len(api_result)}개 찾았습니다."
                 else:
-                    answer = "주간 스킬 빈도 데이터가 없습니다."
+                    job_name = arguments.get('job_name', '해당 직무')
+                    field = arguments.get('field', 'tech_stack')
+                    answer = f"'{job_name}' 직무의 {field} 주간 스킬 빈도 데이터가 없습니다."
             elif tool_name == "job_recommendation":
                 if isinstance(api_result, dict) and "recommendation" in api_result:
                     answer = clean_markdown_text(api_result["recommendation"])
