@@ -3,7 +3,7 @@ import re
 import logging
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from typing import List, Dict, Any, Optional
 
 # 로거 설정
@@ -72,7 +72,7 @@ def get_user_summary(user_id: int, db: Session) -> Optional[Dict[str, Any]]:
     if not user:
         return None
     
-    # 사용자 스킬 정보 조회
+    # 사용자 스킬 정보 조회 (정규화된 스킬명 사용)
     user_skills = db.query(
         Skill.name,
         UserSkill.proficiency
@@ -84,9 +84,34 @@ def get_user_summary(user_id: int, db: Session) -> Optional[Dict[str, Any]]:
     
     logger.info(f"사용자 스킬 조회 결과: {user_skills}")
     
-    skills_with_proficiency = ', '.join([
-        f"{skill}({proficiency})" for skill, proficiency in user_skills
-    ])
+    # 스킬명 정규화 및 매칭 개선
+    normalized_skills = []
+    for skill_name, proficiency in user_skills:
+        # 스킬명 정규화 (대소문자, 공백, 특수문자 처리)
+        normalized = skill_name.strip().lower()
+        # 원본 스킬명과 숙련도를 함께 저장
+        normalized_skills.append(f"{skill_name}({proficiency})")
+    
+    skills_with_proficiency = ', '.join(normalized_skills)
+    
+    # 스킬 매칭을 위한 추가 정보도 저장
+    skill_mapping = {}
+    for skill_name, proficiency in user_skills:
+        # 다양한 형태로 매칭 가능하도록 저장
+        normalized = skill_name.strip().lower()
+        skill_mapping[normalized] = {
+            'original': skill_name,
+            'proficiency': proficiency
+        }
+        # 유사 스킬명도 추가
+        if 'javascript' in normalized:
+            skill_mapping['js'] = {'original': skill_name, 'proficiency': proficiency}
+        elif 'react' in normalized:
+            skill_mapping['react.js'] = {'original': skill_name, 'proficiency': proficiency}
+        elif 'python' in normalized:
+            skill_mapping['python3'] = {'original': skill_name, 'proficiency': proficiency}
+    
+    logger.info(f"스킬 매핑 정보: {skill_mapping}")
     
     # 사용자 자격증 정보 조회
     user_certificates = db.query(
@@ -160,25 +185,29 @@ def make_gap_analysis_prompt_visualization(user_data: Dict[str, Any], skill_tren
 경험: {exp_name} / 기간: {exp_period}
 경험 설명: {exp_desc}
 
-[기준 역량 리스트]
-다음은 최근 **{job_category}** 직무에서 요구되는 주요 역량 리스트입니다.
-이 리스트에는 기술 스택 뿐만 아니라, 협업 경험, 프로젝트 운영, 문서화 능력, 서비스 개선 등
-**비기술적/경험 기반 역량**도 포함되어 있습니다:
+[기준 역량 리스트 - {job_category}]
+다음은 최근 **{job_category}** 직무에서 실제 채용공고를 분석한 주요 역량 리스트입니다.
+이 리스트는 실제 채용공고에서 추출된 기술 스택과 요구사항을 빈도순으로 정렬한 것입니다:
 {', '.join(skill_trend)}
 
-[요청사항]
+[분석 요청사항]
 위 기준 역량 리스트를 상단부터 순서대로 확인하며, 지원자와의 격차를 분석해 주세요.
 
-분석 순서는 다음과 같습니다:
-1. 기준 역량 리스트 상단에 있을수록 **우선순위가 높습니다**.  
-       반드시 리스트 순서를 기준으로 분석해주세요.
-2. 각 항목마다 **지원자 보유 여부 및 숙련도(하/중/상)**를 참고해 격차를 판단해 주세요.
-        단, **리스트 순서를 벗어난 재정렬은 하지 마세요**.
-3. 보유 여부/숙련도에 따른 격차 판단 기준은 다음과 같습니다:
-   - **보유하지 않은 경우** → 격차가 가장 큽니다.
-   - **보유했지만 숙련도 '하'** → 그 다음 격차입니다.
-   - **숙련도 '중'** → 상대적으로 덜한 격차입니다.
-   - **숙련도 '상'**은 격차로 판단하지 않습니다.
+**중요한 분석 기준:**
+1. **기술 스택 매칭**: 지원자의 기술 스택과 채용공고 요구사항을 정확히 매칭해주세요.
+   - 예: "Python(중)" → "Python" 요구사항과 매칭
+   - 예: "Java(하)" → "Java" 요구사항과 매칭 (하지만 숙련도 부족)
+   - 예: "React" → "React.js", "React Native" 등 유사 기술과 매칭 고려
+
+2. **우선순위**: 리스트 상단에 있을수록 **우선순위가 높습니다**.
+   - 상위 10개는 필수 기술로 간주
+   - 하위 기술은 선택 기술로 간주
+
+3. **숙련도 평가**: 
+   - **없음**: 해당 기술을 전혀 보유하지 않음
+   - **하**: 기초 수준 (학습 중이거나 간단한 프로젝트 경험)
+   - **중**: 실무 가능 수준 (실제 프로젝트에서 사용 경험)
+   - **상**: 전문가 수준 (복잡한 프로젝트에서 주도적 사용)
 
 아래 형식에 따라 상위 5개의 격차 항목만 출력해 주세요:
 
@@ -216,10 +245,16 @@ def make_gap_analysis_prompt_visualization(user_data: Dict[str, Any], skill_tren
 - 필수 여부: 필수 / 선택
 - 사유: (설명)
 
+**기술 스택 매칭 시 주의사항:**
+- "JavaScript"와 "JS"는 같은 기술로 간주
+- "React"와 "React.js"는 같은 기술로 간주
+- "Python"과 "Python3"는 같은 기술로 간주
+- "AWS"와 "Amazon Web Services"는 같은 기술로 간주
+
 협업 경험 / 프로젝트 경험 / 운영 경험 등은 **경험 설명에 해당 키워드가 있거나 팀 기반 활동이면 있음으로 간주**해 주세요.  
 예를 들어 "사내 API 개발 및 유지보수"는 협업이 포함된 활동입니다.
 
-**비기술 역량도 중요**하니 기술 스택 외 항목도 반드시 포함하여 평가해 주세요.
+**기술 스택이 가장 중요한 분석 요소**이므로, 지원자의 기술 스택과 채용공고 요구사항을 정확히 매칭하여 분석해 주세요.
 """
 
 # 갭 분석 프롬프트 생성 함수 (todo_list용 - 10개)
@@ -412,25 +447,34 @@ def perform_gap_analysis_visualization(user_id: int, category: str, db: Session)
     try:
         logger.info(f"시각화용 갭 분석 시작 - 사용자 ID: {user_id}, 카테고리: {category}")
         
+        # 1. 트렌드 스킬 조회
         skill_order = get_trend_skills_by_category(category, db)
         logger.info(f"트렌드 스킬 조회 결과: {len(skill_order)}개 스킬")
+        logger.info(f"상위 10개 스킬: {skill_order[:10]}")
         skill_trend = skill_order[:20]  # 상위 20개만 사용
 
+        # 2. 사용자 정보 조회
         user_data = get_user_summary(user_id, db)
         if not user_data:
             logger.error(f"사용자 {user_id}를 찾을 수 없습니다.")
             raise ValueError(f"User {user_id} not found")
         
         logger.info(f"사용자 데이터 조회 성공: {user_data.get('name', 'Unknown')}")
+        logger.info(f"사용자 스킬: {user_data.get('skills_with_proficiency', '없음')}")
 
+        # 3. 프롬프트 생성
         prompt = make_gap_analysis_prompt_visualization(user_data, skill_trend, category)
         logger.info("시각화용 프롬프트 생성 완료")
         
+        # 4. LLM 호출
         gap_result_text = call_llm_for_gap_analysis(prompt)
         logger.info("LLM 분석 완료")
+        logger.info(f"LLM 응답 길이: {len(gap_result_text)}")
         
+        # 5. 결과 추출
         top_skills = extract_top_gap_items(gap_result_text)
         logger.info(f"추출된 Top 스킬 (시각화용): {len(top_skills)}개")
+        logger.info(f"추출된 스킬: {top_skills}")
 
         return {
             "user_id": user_id,

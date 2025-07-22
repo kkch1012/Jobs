@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
+from datetime import datetime, timedelta
+import pytz
+from collections import Counter, defaultdict
 from app.database import get_db
 from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
@@ -29,7 +32,7 @@ router = APIRouter(prefix="/visualization", tags=["Visualization"])
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, qualifications, preferences, required_skills, preferred_skills
-- `weeks_back` 파라미터로 조회할 주차 범위를 지정할 수 있습니다.
+- `start_week`, `end_week`, `year` 파라미터로 조회할 주차 범위를 지정할 수 있습니다.
 - 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
 - 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.
 
@@ -53,7 +56,9 @@ def weekly_skill_frequency(
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
-    weeks_back: int = Query(0, ge=0, le=52, description="몇 주 전까지 조회할지 (0: 현재 주차만, 1: 현재+이전 1주차, 최대 52주)"),
+    start_week: int = Query(..., ge=1, le=53, description="시작 주차 (1-53)"),
+    end_week: int = Query(..., ge=1, le=53, description="마감 주차 (1-53, start_week보다 크거나 같아야 함)"),
+    year: int = Query(..., description="조회할 연도"),
     db: Session = Depends(get_db)
 ):
     # 1. 직무명 → id 매핑
@@ -62,15 +67,11 @@ def weekly_skill_frequency(
         raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
     job_role_id = job_role.id
 
-    # 2. 현재 주차 계산
-    from datetime import datetime
-    import pytz
+    # 2. 주차 범위 검증
+    if start_week > end_week:
+        raise HTTPException(status_code=400, detail="시작 주차는 마감 주차보다 작거나 같아야 합니다.")
     
-    seoul_tz = pytz.timezone('Asia/Seoul')
-    current_date = datetime.now(seoul_tz)
-    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
-    
-    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)
+    # 3. 해당 직무id로 JobPost 필터링 & 주차 범위 집계 (만료되지 않은 공고만)
     posts = db.query(
         JobPost.posting_date,
         getattr(JobPost, field)
@@ -81,16 +82,17 @@ def weekly_skill_frequency(
         )
     ).all()
 
-    # 4. 현재 주차의 기술 키워드 카운트
-    from collections import Counter
-    skill_counter = Counter()
+    # 4. 주차별 기술 키워드 카운트
+    week_skill_counter = defaultdict(Counter)
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
         
-        # 현재 주차의 공고만 처리
-        post_week = posting_date.isocalendar()[1]
-        if post_week == current_week:
-                        # 필드 타입에 따른 처리
+        # 조회 범위 내의 주차만 처리
+        post_year, post_week = posting_date.isocalendar()[0], posting_date.isocalendar()[1]
+        if post_year == year and start_week <= post_week <= end_week:
+            skills = []
+            
+            # 필드 타입에 따른 처리
             if field == "tech_stack":
                 # tech_stack은 문자열 필드
                 if isinstance(field_value, str) and field_value.strip():
@@ -111,17 +113,21 @@ def weekly_skill_frequency(
                         skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
             
             if skills:
-                skill_counter.update(skills)
+                week_skill_counter[post_week].update(skills)
 
-    # 5. 결과 응답 (현재 주차만)
+    # 5. 결과 응답 (주차별)
     response = []
-    for skill, count in skill_counter.items():
-        response.append(WeeklySkillStat(
-            week=current_week, 
-            date=current_date.date(), 
-            skill=skill, 
-            count=count
-        ))
+    for week, counter in week_skill_counter.items():
+        # 해당 주차의 시작일 계산
+        week_start_date = datetime.strptime(f"{year}-W{week:02d}-1", "%Y-W%W-%w").date()
+        
+        for skill, count in counter.items():
+            response.append(WeeklySkillStat(
+                week=week, 
+                date=week_start_date, 
+                skill=skill, 
+                count=count
+            ))
     # count 기준 내림차순 정렬
     response = sorted(response, key=lambda x: x.count, reverse=True)
     return response
@@ -169,9 +175,6 @@ def weekly_skill_frequency_current(
     job_role_id = job_role.id
 
     # 2. 현재 주차 계산
-    from datetime import datetime
-    import pytz
-    
     seoul_tz = pytz.timezone('Asia/Seoul')
     current_date = datetime.now(seoul_tz)
     current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
@@ -188,7 +191,6 @@ def weekly_skill_frequency_current(
     ).all()
 
     # 4. 현재 주차의 기술 키워드 카운트
-    from collections import Counter
     skill_counter = Counter()
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]
@@ -282,7 +284,6 @@ async def resume_vs_job_skill_trend(
         )
     ).all()
     
-    from collections import Counter
     skill_counter = Counter()
     for row in posts:
         posting_date, field_value = row.posting_date, row[1]

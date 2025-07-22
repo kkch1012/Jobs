@@ -177,25 +177,70 @@ def get_unique_employment_types(db: Session = Depends(get_db)):
     "/unique_tech_stacks",
     response_model=List[str],
     summary="기술스택 유니크 리스트 조회",
-    description="등록된 모든 채용공고의 기술스택(중복제거) 리스트를 반환합니다. 여러 기술이 콤마로 구분되어 있을 경우 모두 분리하여 유니크하게 반환합니다."
+    description="주간 스킬 통계에서 추출된 상위 기술스택들의 유니크 리스트를 반환합니다. 실제 채용공고에서 빈도순으로 정렬된 기술 스택을 제공합니다."
 )
-def get_unique_tech_stacks(db: Session = Depends(get_db)):
+def get_unique_tech_stacks(
+    db: Session = Depends(get_db),
+    job_name: Optional[str] = Query(None, description="특정 직무의 기술스택만 조회 (선택사항)")
+):
     try:
-        stacks = db.query(JobPost.tech_stack).distinct().filter(
-            and_(
-                JobPost.tech_stack.isnot(None),
-                or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+        from app.models.weekly_skill_stat import WeeklySkillStat
+        
+        # 특정 직무가 지정된 경우 해당 직무의 기술 스택만 조회
+        if job_name:
+            from app.models.job_required_skill import JobRequiredSkill
+            
+            job_role = db.query(JobRequiredSkill).filter(
+                JobRequiredSkill.job_name == job_name
+            ).first()
+            
+            if job_role:
+                # 직무별 필터링을 위한 쿼리 구성
+                query = db.query(WeeklySkillStat.skill).filter(
+                    and_(
+                        WeeklySkillStat.field_type == "tech_stack",
+                        WeeklySkillStat.job_role_id == job_role.id
+                    )
+                )
+                app_logger.info(f"직무별 기술스택 조회: {job_name}")
+            else:
+                app_logger.warning(f"지정된 직무를 찾을 수 없음: {job_name}")
+                return []
+        else:
+            # 전체 직무의 기술 스택 조회
+            query = db.query(WeeklySkillStat.skill).filter(
+                WeeklySkillStat.field_type == "tech_stack"
             )
+        
+        # 전체 직무를 합쳐서 각 기술 스택의 총 카운트를 구함
+        from sqlalchemy import func
+        
+        # 1. 각 스킬의 총 카운트를 구하고 10개 이상인 것만 필터링
+        skill_counts = db.query(
+            WeeklySkillStat.skill,
+            func.sum(WeeklySkillStat.count).label('total_count')
+        ).filter(
+            WeeklySkillStat.field_type == "tech_stack"
+        ).group_by(
+            WeeklySkillStat.skill
+        ).having(
+            func.sum(WeeklySkillStat.count) >= 10  # 10개 이상인 것만
+        ).order_by(
+            func.sum(WeeklySkillStat.count).desc(),
+            WeeklySkillStat.skill.asc()
         ).all()
-        tech_set = set()
-        for s in stacks:
-            if s[0]:
-                for tech in s[0].split(","):
-                    tech = tech.strip()
-                    if tech:
-                        tech_set.add(tech)
-        result = sorted(list(tech_set))
-        app_logger.info(f"기술스택 유니크 리스트 조회 완료: {len(result)}건")
+        
+        # 2. 스킬명만 추출
+        unique_skills = [(skill, count) for skill, count in skill_counts]
+        
+        result = [skill for skill, count in unique_skills if skill]
+        
+        # 로그 메시지 개선
+        if job_name:
+            app_logger.info(f"기술스택 유니크 리스트 조회 완료: {len(result)}건 (직무: {job_name}, 주간 통계 기반)")
+        else:
+            app_logger.info(f"기술스택 유니크 리스트 조회 완료: {len(result)}건 (전체 직무, 주간 통계 기반)")
+        
         return result
     except Exception as e:
         app_logger.error(f"기술스택 유니크 리스트 조회 실패: {str(e)}")

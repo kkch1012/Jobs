@@ -1,0 +1,1074 @@
+[1mdiff --git a/backend/app/routers/scheduler.py b/backend/app/routers/scheduler.py[m
+[1mindex 6dcdd18..226af71 100644[m
+[1m--- a/backend/app/routers/scheduler.py[m
+[1m+++ b/backend/app/routers/scheduler.py[m
+[36m@@ -1,7 +1,8 @@[m
+ from fastapi import APIRouter, Depends, HTTPException[m
+ from app.services.scheduler import get_scheduler_status, start_scheduler, stop_scheduler[m
+[31m-from app.utils.dependencies import get_current_user[m
+[32m+[m[32mfrom app.utils.dependencies import get_current_user, get_optional_current_user[m[41m[m
+ from app.models.user import User[m
+[32m+[m[32mfrom typing import Optional[m[41m[m
+ [m
+ router = APIRouter(prefix="/scheduler", tags=["Scheduler"])[m
+ [m
+[36m@@ -51,12 +52,9 @@[m [mdef stop():[m
+     description="매일 아침 8시에 자동으로 실행되는 유사도 계산 배치 작업을 수동으로 실행합니다."[m
+ )[m
+ def run_similarity_batch_manual([m
+[31m-    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m    current_user: Optional[User] = Depends(get_optional_current_user)[m[41m[m
+ ):[m
+     """유사도 계산 배치 작업 수동 실행"""[m
+[31m-    # 관리자 권한 확인 (필요시)[m
+[31m-    # if not current_user.is_admin:[m
+[31m-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")[m
+     [m
+     try:[m
+         from app.services.similarity_scores import auto_compute_all_users_similarity[m
+[36m@@ -82,12 +80,9 @@[m [mdef run_similarity_batch_manual([m
+     description="매일 아침 8시에 자동으로 실행되는 일간 스킬 통계 생성 작업을 수동으로 실행합니다."[m
+ )[m
+ def run_daily_stats_manual([m
+[31m-    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m    current_user: Optional[User] = Depends(get_optional_current_user)[m[41m[m
+ ):[m
+     """일간 스킬 통계 생성 작업 수동 실행"""[m
+[31m-    # 관리자 권한 확인 (필요시)[m
+[31m-    # if not current_user.is_admin:[m
+[31m-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")[m
+     [m
+     try:[m
+         from app.services.weekly_stats_service import WeeklyStatsService[m
+[36m@@ -124,12 +119,9 @@[m [mdef run_daily_stats_manual([m
+     description="매일 아침 8시에 자동으로 실행되는 모든 배치 작업(유사도 계산 + 일간 통계 생성)을 수동으로 실행합니다."[m
+ )[m
+ def run_daily_batch_manual([m
+[31m-    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m    current_user: Optional[User] = Depends(get_optional_current_user)[m[41m[m
+ ):[m
+     """매일 아침 배치 작업 수동 실행"""[m
+[31m-    # 관리자 권한 확인 (필요시)[m
+[31m-    # if not current_user.is_admin:[m
+[31m-    #     raise HTTPException(status_code=403, detail="관리자만 실행할 수 있습니다.")[m
+     [m
+     try:[m
+         from app.services.similarity_scores import auto_compute_all_users_similarity[m
+[1mdiff --git a/backend/app/routers/visualization.py b/backend/app/routers/visualization.py[m
+[1mindex ea68cf2..a880bd2 100644[m
+[1m--- a/backend/app/routers/visualization.py[m
+[1m+++ b/backend/app/routers/visualization.py[m
+[36m@@ -1,448 +1,565 @@[m
+[31m-from fastapi import APIRouter, Depends, Query, HTTPException[m
+[31m-from sqlalchemy.orm import Session[m
+[31m-from sqlalchemy import func, and_, or_[m
+[31m-from typing import List, Dict, Any, Optional[m
+[31m-from starlette.responses import JSONResponse[m
+[31m-from app.database import get_db[m
+[31m-from app.models.job_post import JobPost[m
+[31m-from app.models.job_required_skill import JobRequiredSkill[m
+[31m-from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison[m
+[31m-from app.utils.dependencies import get_current_user[m
+[31m-from app.models.user_skill import UserSkill[m
+[31m-from app.models.user import User[m
+[31m-from app.models.certificate import Certificate[m
+[31m-from app.services.gap_model import perform_gap_analysis_visualization[m
+[31m-from app.services.weekly_stats_service import WeeklyStatsService[m
+[31m-from app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel[m
+[31m-from app.services.roadmap_model import get_roadmap_recommendations[m
+[31m-[m
+[31m-router = APIRouter(prefix="/visualization", tags=["Visualization"])[m
+[31m-[m
+[31m-@router.get([m
+[31m-    "/weekly_skill_frequency",[m
+[31m-    operation_id="weekly_skill_frequency",[m
+[31m-    summary="직무별 주간 스킬 빈도 조회",[m
+[31m-    description="""[m
+[31m-선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 최근 채용공고에서 추출된 **기술/키워드의 주별 등장 빈도**를 집계하여 반환합니다.[m
+[31m-[m
+[31m-- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.[m
+[31m-- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.[m
+[31m-- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.[m
+[31m-    - tech_stack, qualifications, preferences, required_skills, preferred_skills[m
+[31m-- 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.[m
+[31m-- 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.[m
+[31m-[m
+[31m-**응답 예시:**[m
+[31m-```json[m
+[31m-[[m
+[31m-  { "year": 2025, "week": 28, "skill": "Python", "count": 12 },[m
+[31m-  { "year": 2025, "week": 28, "skill": "SQL", "count": 7 },[m
+[31m-  { "year": 2025, "week": 27, "skill": "Java", "count": 5 }[m
+[31m-][m
+[31m-""",[m
+[31m-    response_model=List[WeeklySkillStat][m
+[31m-)[m
+[31m-def weekly_skill_frequency([m
+[31m-    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),[m
+[31m-    field: str = Query([m
+[31m-        "tech_stack",[m
+[31m-        enum=[[m
+[31m-            "tech_stack", "qualifications", "preferences",[m
+[31m-            "required_skills", "preferred_skills"[m
+[31m-        ],[m
+[31m-        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"[m
+[31m-    ),[m
+[31m-    db: Session = Depends(get_db)[m
+[31m-):[m
+[31m-    # 1. 직무명 → id 매핑[m
+[31m-    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()[m
+[31m-    if not job_role:[m
+[31m-        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")[m
+[31m-    job_role_id = job_role.id[m
+[31m-[m
+[31m-    # 2. 해당 직무id로 JobPost 필터링 & 주별 집계 (만료되지 않은 공고만)[m
+[31m-    posts = db.query([m
+[31m-        JobPost.posting_date,[m
+[31m-        getattr(JobPost, field)[m
+[31m-    ).filter([m
+[31m-        and_([m
+[31m-            JobPost.job_required_skill_id == job_role_id,[m
+[31m-            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))[m
+[31m-        )[m
+[31m-    ).all()[m
+[31m-[m
+[31m-    # 3. 주별로 기술 키워드 카운트 (ISO 주차 사용)[m
+[31m-    from collections import Counter, defaultdict[m
+[31m-    from datetime import datetime[m
+[31m-    week_skill_counter = defaultdict(Counter)[m
+[31m-    for row in posts:[m
+[31m-        posting_date, field_value = row.posting_date, row[1][m
+[31m-        [m
+[31m-        # ISO 주차 계산[m
+[31m-        week_number = posting_date.isocalendar()[1]  # ISO 주차[m
+[31m-        posting_date_only = posting_date.date()  # 날짜만 추출[m
+[31m-        [m
+[31m-        skills = [][m
+[31m-        [m
+[31m-        # 필드 타입에 따른 처리[m
+[31m-        if field == "tech_stack":[m
+[31m-            # tech_stack은 문자열 필드[m
+[31m-            if isinstance(field_value, str) and field_value.strip():[m
+[31m-                skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[31m-        else:[m
+[31m-            # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드[m
+[31m-            if isinstance(field_value, list):[m
+[31m-                skills = [str(skill).strip() for skill in field_value if skill][m
+[31m-            elif isinstance(field_value, str) and field_value.strip():[m
+[31m-                # JSON 문자열인 경우 파싱 시도[m
+[31m-                try:[m
+[31m-                    import json[m
+[31m-                    parsed = json.loads(field_value)[m
+[31m-                    if isinstance(parsed, list):[m
+[31m-                        skills = [str(skill).strip() for skill in parsed if skill][m
+[31m-                except:[m
+[31m-                    # 파싱 실패 시 문자열로 처리[m
+[31m-                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[31m-        [m
+[31m-        if skills:[m
+[31m-            week_skill_counter[(week_number, posting_date_only)].update(skills)[m
+[31m-[m
+[31m-    # 4. 결과 응답[m
+[31m-    response = [][m
+[31m-    for (week, date_val), counter in week_skill_counter.items():[m
+[31m-        for skill, count in counter.items():[m
+[31m-            response.append(WeeklySkillStat([m
+[31m-                week=week, date=date_val, skill=skill, count=count[m
+[31m-            ))[m
+[31m-    # count 기준 내림차순 정렬[m
+[31m-    response = sorted(response, key=lambda x: x.count, reverse=True)[m
+[31m-    return response[m
+[31m-[m
+[31m-@router.get([m
+[31m-    "/resume_vs_job_skill_trend",[m
+[31m-    summary="내 이력서 vs 직무별 주간 스킬 빈도 비교",[m
+[31m-    description="내 이력서(보유 스킬)와 선택한 직무의 주간 스킬 빈도 통계를 비교하여 강점(보유)/약점(미보유) 스킬을 시각화할 수 있도록 반환합니다.",[m
+[31m-    response_model=List[ResumeSkillComparison][m
+[31m-)[m
+[31m-async def resume_vs_job_skill_trend([m
+[31m-    job_name: str = Query(..., description="비교할 직무명 (예: 백엔드 개발자)"),[m
+[31m-    field: str = Query([m
+[31m-        "tech_stack",[m
+[31m-        enum=[[m
+[31m-            "tech_stack", "qualifications", "preferences",[m
+[31m-            "required_skills", "preferred_skills"[m
+[31m-        ],[m
+[31m-        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"[m
+[31m-    ),[m
+[31m-    db: Session = Depends(get_db),[m
+[31m-    current_user: User = Depends(get_current_user)[m
+[31m-):[m
+[31m-    # 1. 내 이력서(보유 스킬) 조회[m
+[31m-    user_skills = db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()[m
+[31m-    my_skill_set = set()[m
+[31m-    for us in user_skills:[m
+[31m-        if hasattr(us, 'skill') and us.skill and hasattr(us.skill, 'name'):[m
+[31m-            my_skill_set.add(us.skill.name)[m
+[31m-        elif hasattr(us, 'skill_name'):[m
+[31m-            my_skill_set.add(us.skill_name)[m
+[31m-[m
+[31m-    # 2. 직무별 주간 스킬 빈도 데이터 조회 (기존 함수 재활용)[m
+[31m-    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()[m
+[31m-    if not job_role:[m
+[31m-        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")[m
+[31m-    job_role_id = job_role.id[m
+[31m-    posts = db.query([m
+[31m-        JobPost.posting_date,[m
+[31m-        getattr(JobPost, field)[m
+[31m-    ).filter([m
+[31m-        and_([m
+[31m-            JobPost.job_required_skill_id == job_role_id,[m
+[31m-            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))[m
+[31m-        )[m
+[31m-    ).all()[m
+[31m-    from collections import Counter, defaultdict[m
+[31m-    from datetime import datetime[m
+[31m-    week_skill_counter = defaultdict(Counter)[m
+[31m-    for row in posts:[m
+[31m-        posting_date, field_value = row.posting_date, row[1][m
+[31m-        [m
+[31m-        # ISO 주차와 날짜 계산[m
+[31m-        week_number = posting_date.isocalendar()[1]  # ISO 주차[m
+[31m-        posting_date_only = posting_date.date()  # 날짜만 추출[m
+[31m-        [m
+[31m-        skills = [][m
+[31m-        [m
+[31m-        # 필드 타입에 따른 처리[m
+[31m-        if field == "tech_stack":[m
+[31m-            # tech_stack은 문자열 필드[m
+[31m-            if isinstance(field_value, str) and field_value.strip():[m
+[31m-                skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[31m-        else:[m
+[31m-            # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드[m
+[31m-            if isinstance(field_value, list):[m
+[31m-                skills = [str(skill).strip() for skill in field_value if skill][m
+[31m-            elif isinstance(field_value, str) and field_value.strip():[m
+[31m-                # JSON 문자열인 경우 파싱 시도[m
+[31m-                try:[m
+[31m-                    import json[m
+[31m-                    parsed = json.loads(field_value)[m
+[31m-                    if isinstance(parsed, list):[m
+[31m-                        skills = [str(skill).strip() for skill in parsed if skill][m
+[31m-                except:[m
+[31m-                    # 파싱 실패 시 문자열로 처리[m
+[31m-                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[31m-        [m
+[31m-        # 스킬명 길이 제한 (500자)[m
+[31m-        if skills:[m
+[31m-            limited_skills = [][m
+[31m-            for skill in skills:[m
+[31m-                if len(skill) > 500:[m
+[31m-                    skill = skill[:497] + "..."  # 500자로 제한[m
+[31m-                limited_skills.append(skill)[m
+[31m-            week_skill_counter[(week_number, posting_date_only)].update(limited_skills)[m
+[31m-    # 3. 강점/약점 비교 및 응답 생성[m
+[31m-    response = [][m
+[31m-    for (week, date_val), counter in week_skill_counter.items():[m
+[31m-        for skill, count in counter.items():[m
+[31m-            status = "강점" if skill in my_skill_set else "약점"[m
+[31m-            response.append(ResumeSkillComparison([m
+[31m-                skill=skill, count=count, status=status, week=week, date=date_val[m
+[31m-            ))[m
+[31m-    return response[m
+[31m-[m
+[31m-@router.get("/gap-analysis", response_class=JSONResponse,[m
+[31m-    summary="GPT 기반 갭차이 분석",[m
+[31m-    description="""[m
+[31m-사용자의 이력 정보와 선택한 직무(카테고리)를 바탕으로 GPT(OpenRouter) 기반 갭차이 분석을 수행합니다.\n[m
+[31m-- 분석 결과는 자연어 설명(gap_result)과 부족 역량 Top 5 리스트(top_skills)로 구성됩니다.\n[m
+[31m-- 프론트엔드는 gap_result를 출력용으로, top_skills를 투두리스트 등 내부 활용에 사용할 수 있습니다.\n[m
+[31m-- LLM 호출 실패 시 에러 메시지가 반환될 수 있습니다.[m
+[31m-"""[m
+[31m-)[m
+[31m-def gap_analysis_endpoint([m
+[31m-    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[31m-    db: Session = Depends(get_db),[m
+[31m-    current_user: User = Depends(get_current_user)[m
+[31m-):[m
+[31m-    """[m
+[31m-    사용자의 이력 정보와 선택한 직무를 바탕으로 LLM 기반 갭차이 분석을 수행합니다.[m
+[31m-    분석 결과는 자연어 설명과 부족 역량 Top 5 리스트로 구성됩니다.[m
+[31m-    """[m
+[31m-    try:[m
+[31m-        user_id = getattr(current_user, "id", None)[m
+[31m-        if user_id is None:[m
+[31m-            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")[m
+[31m-        if hasattr(user_id, "__int__"):[m
+[31m-            user_id = int(user_id)[m
+[31m-        if not isinstance(user_id, int):[m
+[31m-            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")[m
+[31m-        result = perform_gap_analysis_visualization(user_id, category, db=db)[m
+[31m-[m
+[31m-        # 1. 프론트에 보여줄 자연어 결과[m
+[31m-        gap_result = result["gap_result"][m
+[31m-[m
+[31m-        # 2. 내부 To-Do 시스템으로 보낼 Top 5 스킬[m
+[31m-        top_skills = result["top_skills"][m
+[31m-        # 예시: 추후 비동기로 보내거나 DB에 저장[m
+[31m-        # send_to_todo(user_id, top_skills)[m
+[31m-[m
+[31m-        return {[m
+[31m-            "gap_result": gap_result,      # 프론트에 출력할 자연어[m
+[31m-            "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능[m
+[31m-        }[m
+[31m-[m
+[31m-    except ValueError as e:[m
+[31m-        raise HTTPException(status_code=404, detail=str(e))[m
+[31m-    except Exception as e:[m
+[31m-        import traceback[m
+[31m-        error_detail = f"갭 분석 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[31m-        raise HTTPException(status_code=500, detail=error_detail)[m
+[31m-[m
+[31m-@router.get([m
+[31m-    "/skill_search",[m
+[31m-    summary="스킬명 검색",[m
+[31m-    description="""[m
+[31m-weekly_skill_stats 테이블에서 스킬명을 검색하여 해당 스킬의 통계 정보를 반환합니다.[m
+[31m-- 부분 검색을 지원합니다 (예: "aw" 검색 시 "aws" 포함된 스킬들이 검색됨)[m
+[31m-- count, 직무명, field_type 정보를 함께 반환합니다.[m
+[31m-[m
+[31m-**응답 예시:**[m
+[31m-```json[m
+[31m-[[m
+[31m-  {[m
+[31m-    "skill": "AWS",[m
+[31m-    "count": 15,[m
+[31m-    "job_name": "백엔드 개발자",[m
+[31m-    "field_type": "tech_stack",[m
+[31m-    "week": 29,[m
+[31m-    "date": "2025-01-15"[m
+[31m-  }[m
+[31m-][m
+[31m-```[m
+[31m-""",[m
+[31m-    response_model=List[Dict[str, Any]][m
+[31m-)[m
+[31m-def skill_search([m
+[31m-    skill_name: str = Query(..., description="검색할 스킬명 (부분 검색 지원)"),[m
+[31m-    db: Session = Depends(get_db)[m
+[31m-):[m
+[31m-    """[m
+[31m-    weekly_skill_stats 테이블에서 스킬명을 검색합니다.[m
+[31m-    """[m
+[31m-    try:[m
+[31m-        # 스킬명으로 검색 (대소문자 구분 없이 부분 검색, 만료되지 않은 공고 기반 통계만)[m
+[31m-        stats = db.query([m
+[31m-            WeeklySkillStatModel.skill,[m
+[31m-            WeeklySkillStatModel.count,[m
+[31m-            WeeklySkillStatModel.field_type,[m
+[31m-            WeeklySkillStatModel.week,[m
+[31m-            WeeklySkillStatModel.date,[m
+[31m-            JobRequiredSkill.job_name[m
+[31m-        ).join([m
+[31m-            JobRequiredSkill,[m
+[31m-            WeeklySkillStatModel.job_role_id == JobRequiredSkill.id[m
+[31m-        ).filter([m
+[31m-            WeeklySkillStatModel.skill.ilike(f"%{skill_name}%")[m
+[31m-        ).order_by([m
+[31m-            WeeklySkillStatModel.count.desc(),[m
+[31m-            WeeklySkillStatModel.skill.asc()[m
+[31m-        ).all()[m
+[31m-        [m
+[31m-        # 응답 형식으로 변환[m
+[31m-        result = [][m
+[31m-        for stat in stats:[m
+[31m-            result.append({[m
+[31m-                "skill": stat.skill,[m
+[31m-                "count": stat.count,[m
+[31m-                "job_name": stat.job_name,[m
+[31m-                "field_type": stat.field_type,[m
+[31m-                "week": stat.week,[m
+[31m-                "date": stat.date.isoformat() if stat.date else None[m
+[31m-            })[m
+[31m-        [m
+[31m-        return result[m
+[31m-        [m
+[31m-    except Exception as e:[m
+[31m-        import traceback[m
+[31m-        error_detail = f"스킬 검색 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[31m-        raise HTTPException(status_code=500, detail=error_detail)[m
+[31m-[m
+[31m-@router.get([m
+[31m-    "/roadmap_recommendations",[m
+[31m-    summary="로드맵 추천",[m
+[31m-    description="""[m
+[31m-사용자의 갭 분석 결과를 바탕으로 맞춤형 로드맵을 추천합니다.[m
+[31m-[m
+[31m-- 갭 분석을 통해 부족한 스킬을 파악[m
+[31m-- 트렌드 스킬과 사용자 스킬을 비교하여 점수 계산[m
+[31m-- 점수가 높은 로드맵을 우선적으로 추천[m
+[31m-- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)[m
+[31m-- 부트캠프 limit개 + 강의 limit개를 반환[m
+[31m-- type 파라미터로 부트캠프/강의 필터링 가능[m
+[31m-""",[m
+[31m-    response_model=List[Dict[str, Any]][m
+[31m-)[m
+[31m-async def get_roadmap_recommendations_endpoint([m
+[31m-    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[31m-    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),[m
+[31m-    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),[m
+[31m-    db: Session = Depends(get_db),[m
+[31m-    current_user: User = Depends(get_current_user)[m
+[31m-):[m
+[31m-    """[m
+[31m-    사용자에게 맞는 로드맵을 추천합니다.[m
+[31m-    """[m
+[31m-    try:[m
+[31m-        # limit 검증[m
+[31m-        if limit > 20:[m
+[31m-            limit = 20[m
+[31m-        elif limit < 1:[m
+[31m-            limit = 1[m
+[31m-            [m
+[31m-        user_id = getattr(current_user, "id", None)[m
+[31m-        if user_id is None:[m
+[31m-            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")[m
+[31m-        [m
+[31m-        # 1. 갭 분석 수행[m
+[31m-        gap_analysis_result = perform_gap_analysis_visualization(user_id, category, db)[m
+[31m-        [m
+[31m-        # 2. 로드맵 추천 수행[m
+[31m-        recommended_roadmaps = get_roadmap_recommendations([m
+[31m-            user_id=user_id,[m
+[31m-            category=category,[m
+[31m-            gap_result_text=gap_analysis_result["gap_result"],[m
+[31m-            db=db,[m
+[31m-            limit=limit[m
+[31m-        )[m
+[31m-        [m
+[31m-        # 3. type별 필터링[m
+[31m-        if type:[m
+[31m-            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type][m
+[31m-            return filtered_roadmaps[m
+[31m-        [m
+[31m-        return recommended_roadmaps[m
+[31m-        [m
+[31m-    except ValueError as e:[m
+[31m-        raise HTTPException(status_code=404, detail=str(e))[m
+[31m-    except Exception as e:[m
+[31m-        import traceback[m
+[31m-        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[31m-        raise HTTPException(status_code=500, detail=error_detail)[m
+[31m-[m
+[31m-@router.get([m
+[31m-    "/roadmap_recommendations/direct",[m
+[31m-    summary="직접 갭 분석 결과로 로드맵 추천",[m
+[31m-    description="""[m
+[31m-이미 수행된 갭 분석 결과를 직접 입력받아 로드맵을 추천합니다.[m
+[31m-[m
+[31m-- 갭 분석 결과 텍스트를 직접 입력[m
+[31m-- 별도의 갭 분석 과정 없이 바로 로드맵 추천[m
+[31m-- 기존 갭 분석 결과를 재활용할 때 유용[m
+[31m-- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)[m
+[31m-- 부트캠프 limit개 + 강의 limit개를 반환[m
+[31m-- type 파라미터로 부트캠프/강의 필터링 가능[m
+[31m-""",[m
+[31m-    response_model=List[Dict[str, Any]][m
+[31m-)[m
+[31m-async def get_roadmap_recommendations_direct([m
+[31m-    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[31m-    gap_result_text: str = Query(..., description="갭 분석 결과 텍스트"),[m
+[31m-    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),[m
+[31m-    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),[m
+[31m-    db: Session = Depends(get_db),[m
+[31m-    current_user: User = Depends(get_current_user)[m
+[31m-):[m
+[31m-    """[m
+[31m-    직접 입력된 갭 분석 결과로 로드맵을 추천합니다.[m
+[31m-    """[m
+[31m-    try:[m
+[31m-        # limit 검증[m
+[31m-        if limit > 20:[m
+[31m-            limit = 20[m
+[31m-        elif limit < 1:[m
+[31m-            limit = 1[m
+[31m-            [m
+[31m-        user_id = getattr(current_user, "id", None)[m
+[31m-        if user_id is None:[m
+[31m-            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")[m
+[31m-        [m
+[31m-        # 로드맵 추천 수행[m
+[31m-        recommended_roadmaps = get_roadmap_recommendations([m
+[31m-            user_id=user_id,[m
+[31m-            category=category,[m
+[31m-            gap_result_text=gap_result_text,[m
+[31m-            db=db,[m
+[31m-            limit=limit[m
+[31m-        )[m
+[31m-        [m
+[31m-        # type별 필터링[m
+[31m-        if type:[m
+[31m-            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type][m
+[31m-            return filtered_roadmaps[m
+[31m-        [m
+[31m-        return recommended_roadmaps[m
+[31m-        [m
+[31m-    except Exception as e:[m
+[31m-        import traceback[m
+[31m-        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[31m-        raise HTTPException(status_code=500, detail=error_detail)[m
+[32m+[m[32mfrom fastapi import APIRouter, Depends, Query, HTTPException[m
+[32m+[m[32mfrom sqlalchemy.orm import Session[m
+[32m+[m[32mfrom sqlalchemy import func, and_, or_[m
+[32m+[m[32mfrom typing import List, Dict, Any, Optional[m
+[32m+[m[32mfrom starlette.responses import JSONResponse[m
+[32m+[m[32mfrom app.database import get_db[m
+[32m+[m[32mfrom app.models.job_post import JobPost[m
+[32m+[m[32mfrom app.models.job_required_skill import JobRequiredSkill[m
+[32m+[m[32mfrom app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison[m
+[32m+[m[32mfrom app.utils.dependencies import get_current_user[m
+[32m+[m[32mfrom app.models.user_skill import UserSkill[m
+[32m+[m[32mfrom app.models.user import User[m
+[32m+[m[32mfrom app.models.certificate import Certificate[m
+[32m+[m[32mfrom app.services.gap_model import perform_gap_analysis_visualization[m
+[32m+[m[32mfrom app.services.weekly_stats_service import WeeklyStatsService[m
+[32m+[m[32mfrom app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel[m
+[32m+[m[32mfrom app.services.roadmap_model import get_roadmap_recommendations[m
+[32m+[m
+[32m+[m[32mrouter = APIRouter(prefix="/visualization", tags=["Visualization"])[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/weekly_skill_frequency",[m
+[32m+[m[32m    operation_id="weekly_skill_frequency",[m
+[32m+[m[32m    summary="직무별 주간 스킬 빈도 조회 (주차 범위 지정)",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32m선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 지정된 주차 범위의 채용공고에서 추출된 **기술/키워드의 주별 등장 빈도**를 집계하여 반환합니다.[m
+[32m+[m
+[32m+[m[32m- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.[m
+[32m+[m[32m- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.[m
+[32m+[m[32m- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.[m
+[32m+[m[32m    - tech_stack, qualifications, preferences, required_skills, preferred_skills[m
+[32m+[m[32m- `weeks_back` 파라미터로 조회할 주차 범위를 지정할 수 있습니다.[m
+[32m+[m[32m- 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.[m
+[32m+[m[32m- 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.[m
+[32m+[m
+[32m+[m[32m**응답 예시:**[m
+[32m+[m[32m```json[m
+[32m+[m[32m[[m
+[32m+[m[32m  { "year": 2025, "week": 28, "skill": "Python", "count": 12 },[m
+[32m+[m[32m  { "year": 2025, "week": 28, "skill": "SQL", "count": 7 },[m
+[32m+[m[32m  { "year": 2025, "week": 27, "skill": "Java", "count": 5 }[m
+[32m+[m[32m][m
+[32m+[m[32m""",[m
+[32m+[m[32m    response_model=List[WeeklySkillStat][m
+[32m+[m[32m)[m
+[32m+[m[32mdef weekly_skill_frequency([m
+[32m+[m[32m    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),[m
+[32m+[m[32m    field: str = Query([m
+[32m+[m[32m        "tech_stack",[m
+[32m+[m[32m        enum=[[m
+[32m+[m[32m            "tech_stack", "qualifications", "preferences",[m
+[32m+[m[32m            "required_skills", "preferred_skills"[m
+[32m+[m[32m        ],[m
+[32m+[m[32m        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"[m
+[32m+[m[32m    ),[m
+[32m+[m[32m    weeks_back: int = Query(0, ge=0, le=52, description="몇 주 전까지 조회할지 (0: 현재 주차만, 1: 현재+이전 1주차, 최대 52주)"),[m
+[32m+[m[32m    db: Session = Depends(get_db)[m
+[32m+[m[32m):[m
+[32m+[m[32m    # 1. 직무명 → id 매핑[m
+[32m+[m[32m    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()[m
+[32m+[m[32m    if not job_role:[m
+[32m+[m[32m        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")[m
+[32m+[m[32m    job_role_id = job_role.id[m
+[32m+[m
+[32m+[m[32m    # 2. 현재 주차 계산[m
+[32m+[m[32m    from datetime import datetime[m
+[32m+[m[32m    import pytz[m
+[32m+[m[41m    [m
+[32m+[m[32m    seoul_tz = pytz.timezone('Asia/Seoul')[m
+[32m+[m[32m    current_date = datetime.now(seoul_tz)[m
+[32m+[m[32m    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차[m
+[32m+[m[41m    [m
+[32m+[m[32m    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)[m
+[32m+[m[32m    posts = db.query([m
+[32m+[m[32m        JobPost.posting_date,[m
+[32m+[m[32m        getattr(JobPost, field)[m
+[32m+[m[32m    ).filter([m
+[32m+[m[32m        and_([m
+[32m+[m[32m            JobPost.job_required_skill_id == job_role_id,[m
+[32m+[m[32m            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))[m
+[32m+[m[32m        )[m
+[32m+[m[32m    ).all()[m
+[32m+[m
+[32m+[m[32m    # 4. 현재 주차의 기술 키워드 카운트[m
+[32m+[m[32m    from collections import Counter[m
+[32m+[m[32m    skill_counter = Counter()[m
+[32m+[m[32m    for row in posts:[m
+[32m+[m[32m        posting_date, field_value = row.posting_date, row[1][m
+[32m+[m[41m        [m
+[32m+[m[32m        # 현재 주차의 공고만 처리[m
+[32m+[m[32m        post_week = posting_date.isocalendar()[1][m
+[32m+[m[32m        if post_week == current_week:[m
+[32m+[m[32m                        # 필드 타입에 따른 처리[m
+[32m+[m[32m            if field == "tech_stack":[m
+[32m+[m[32m                # tech_stack은 문자열 필드[m
+[32m+[m[32m                if isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[32m            else:[m
+[32m+[m[32m                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드[m
+[32m+[m[32m                if isinstance(field_value, list):[m
+[32m+[m[32m                    skills = [str(skill).strip() for skill in field_value if skill][m
+[32m+[m[32m                elif isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    # JSON 문자열인 경우 파싱 시도[m
+[32m+[m[32m                    try:[m
+[32m+[m[32m                        import json[m
+[32m+[m[32m                        parsed = json.loads(field_value)[m
+[32m+[m[32m                        if isinstance(parsed, list):[m
+[32m+[m[32m                            skills = [str(skill).strip() for skill in parsed if skill][m
+[32m+[m[32m                    except:[m
+[32m+[m[32m                        # 파싱 실패 시 문자열로 처리[m
+[32m+[m[32m                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[41m            [m
+[32m+[m[32m            if skills:[m
+[32m+[m[32m                skill_counter.update(skills)[m
+[32m+[m
+[32m+[m[32m    # 5. 결과 응답 (현재 주차만)[m
+[32m+[m[32m    response = [][m
+[32m+[m[32m    for skill, count in skill_counter.items():[m
+[32m+[m[32m        response.append(WeeklySkillStat([m
+[32m+[m[32m            week=current_week,[m[41m [m
+[32m+[m[32m            date=current_date.date(),[m[41m [m
+[32m+[m[32m            skill=skill,[m[41m [m
+[32m+[m[32m            count=count[m
+[32m+[m[32m        ))[m
+[32m+[m[32m    # count 기준 내림차순 정렬[m
+[32m+[m[32m    response = sorted(response, key=lambda x: x.count, reverse=True)[m
+[32m+[m[32m    return response[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/weekly_skill_frequency_current",[m
+[32m+[m[32m    operation_id="weekly_skill_frequency_current",[m
+[32m+[m[32m    summary="직무별 현재 주차 스킬 빈도 조회",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32m선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, **현재 주차의 채용공고**에서 추출된 **기술/키워드의 등장 빈도**를 집계하여 반환합니다.[m
+[32m+[m
+[32m+[m[32m- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.[m
+[32m+[m[32m- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.[m
+[32m+[m[32m- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.[m
+[32m+[m[32m    - tech_stack, qualifications, preferences, required_skills, preferred_skills[m
+[32m+[m[32m- **현재 주차만** 조회하여 실시간 트렌드를 파악할 수 있습니다.[m
+[32m+[m[32m- 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.[m
+[32m+[m
+[32m+[m[32m**응답 예시:**[m
+[32m+[m[32m```json[m
+[32m+[m[32m[[m
+[32m+[m[32m  { "year": 2025, "week": 29, "skill": "Python", "count": 12 },[m
+[32m+[m[32m  { "year": 2025, "week": 29, "skill": "SQL", "count": 7 },[m
+[32m+[m[32m  { "year": 2025, "week": 29, "skill": "Java", "count": 5 }[m
+[32m+[m[32m][m
+[32m+[m[32m""",[m
+[32m+[m[32m    response_model=List[WeeklySkillStat][m
+[32m+[m[32m)[m
+[32m+[m[32mdef weekly_skill_frequency_current([m
+[32m+[m[32m    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),[m
+[32m+[m[32m    field: str = Query([m
+[32m+[m[32m        "tech_stack",[m
+[32m+[m[32m        enum=[[m
+[32m+[m[32m            "tech_stack", "qualifications", "preferences",[m
+[32m+[m[32m            "required_skills", "preferred_skills"[m
+[32m+[m[32m        ],[m
+[32m+[m[32m        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"[m
+[32m+[m[32m    ),[m
+[32m+[m[32m    db: Session = Depends(get_db)[m
+[32m+[m[32m):[m
+[32m+[m[32m    # 1. 직무명 → id 매핑[m
+[32m+[m[32m    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()[m
+[32m+[m[32m    if not job_role:[m
+[32m+[m[32m        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")[m
+[32m+[m[32m    job_role_id = job_role.id[m
+[32m+[m
+[32m+[m[32m    # 2. 현재 주차 계산[m
+[32m+[m[32m    from datetime import datetime[m
+[32m+[m[32m    import pytz[m
+[32m+[m[41m    [m
+[32m+[m[32m    seoul_tz = pytz.timezone('Asia/Seoul')[m
+[32m+[m[32m    current_date = datetime.now(seoul_tz)[m
+[32m+[m[32m    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차[m
+[32m+[m[41m    [m
+[32m+[m[32m    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)[m
+[32m+[m[32m    posts = db.query([m
+[32m+[m[32m        JobPost.posting_date,[m
+[32m+[m[32m        getattr(JobPost, field)[m
+[32m+[m[32m    ).filter([m
+[32m+[m[32m        and_([m
+[32m+[m[32m            JobPost.job_required_skill_id == job_role_id,[m
+[32m+[m[32m            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))[m
+[32m+[m[32m        )[m
+[32m+[m[32m    ).all()[m
+[32m+[m
+[32m+[m[32m    # 4. 현재 주차의 기술 키워드 카운트[m
+[32m+[m[32m    from collections import Counter[m
+[32m+[m[32m    skill_counter = Counter()[m
+[32m+[m[32m    for row in posts:[m
+[32m+[m[32m        posting_date, field_value = row.posting_date, row[1][m
+[32m+[m[41m        [m
+[32m+[m[32m        # 현재 주차의 공고만 처리[m
+[32m+[m[32m        post_week = posting_date.isocalendar()[1][m
+[32m+[m[32m        if post_week == current_week:[m
+[32m+[m[32m            skills = [][m
+[32m+[m[41m            [m
+[32m+[m[32m            # 필드 타입에 따른 처리[m
+[32m+[m[32m            if field == "tech_stack":[m
+[32m+[m[32m                # tech_stack은 문자열 필드[m
+[32m+[m[32m                if isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[32m            else:[m
+[32m+[m[32m                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드[m
+[32m+[m[32m                if isinstance(field_value, list):[m
+[32m+[m[32m                    skills = [str(skill).strip() for skill in field_value if skill][m
+[32m+[m[32m                elif isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    # JSON 문자열인 경우 파싱 시도[m
+[32m+[m[32m                    try:[m
+[32m+[m[32m                        import json[m
+[32m+[m[32m                        parsed = json.loads(field_value)[m
+[32m+[m[32m                        if isinstance(parsed, list):[m
+[32m+[m[32m                            skills = [str(skill).strip() for skill in parsed if skill][m
+[32m+[m[32m                    except:[m
+[32m+[m[32m                        # 파싱 실패 시 문자열로 처리[m
+[32m+[m[32m                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[41m            [m
+[32m+[m[32m            if skills:[m
+[32m+[m[32m                skill_counter.update(skills)[m
+[32m+[m
+[32m+[m[32m    # 5. 결과 응답 (현재 주차만)[m
+[32m+[m[32m    response = [][m
+[32m+[m[32m    for skill, count in skill_counter.items():[m
+[32m+[m[32m        response.append(WeeklySkillStat([m
+[32m+[m[32m            week=current_week,[m[41m [m
+[32m+[m[32m            date=current_date.date(),[m[41m [m
+[32m+[m[32m            skill=skill,[m[41m [m
+[32m+[m[32m            count=count[m
+[32m+[m[32m        ))[m
+[32m+[m[32m    # count 기준 내림차순 정렬[m
+[32m+[m[32m    response = sorted(response, key=lambda x: x.count, reverse=True)[m
+[32m+[m[32m    return response[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/resume_vs_job_skill_trend",[m
+[32m+[m[32m    summary="내 이력서 vs 직무별 주간 스킬 빈도 비교",[m
+[32m+[m[32m    description="내 이력서(보유 스킬)와 선택한 직무의 주간 스킬 빈도 통계를 비교하여 강점(보유)/약점(미보유) 스킬을 시각화할 수 있도록 반환합니다.",[m
+[32m+[m[32m    response_model=List[ResumeSkillComparison][m
+[32m+[m[32m)[m
+[32m+[m[32masync def resume_vs_job_skill_trend([m
+[32m+[m[32m    job_name: str = Query(..., description="비교할 직무명 (예: 백엔드 개발자)"),[m
+[32m+[m[32m    field: str = Query([m
+[32m+[m[32m        "tech_stack",[m
+[32m+[m[32m        enum=[[m
+[32m+[m[32m            "tech_stack", "qualifications", "preferences",[m
+[32m+[m[32m            "required_skills", "preferred_skills"[m
+[32m+[m[32m        ],[m
+[32m+[m[32m        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"[m
+[32m+[m[32m    ),[m
+[32m+[m[32m    db: Session = Depends(get_db),[m
+[32m+[m[32m    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m):[m
+[32m+[m[32m    # 1. 내 이력서(보유 스킬) 조회[m
+[32m+[m[32m    user_skills = db.query(UserSkill).filter(UserSkill.user_id == current_user.id).all()[m
+[32m+[m[32m    my_skill_set = set()[m
+[32m+[m[32m    for us in user_skills:[m
+[32m+[m[32m        if hasattr(us, 'skill') and us.skill and hasattr(us.skill, 'name'):[m
+[32m+[m[32m            my_skill_set.add(us.skill.name)[m
+[32m+[m[32m        elif hasattr(us, 'skill_name'):[m
+[32m+[m[32m            my_skill_set.add(us.skill_name)[m
+[32m+[m
+[32m+[m[32m    # 2. 현재 주차 계산[m
+[32m+[m[32m    seoul_tz = pytz.timezone('Asia/Seoul')[m
+[32m+[m[32m    current_date = datetime.now(seoul_tz)[m
+[32m+[m[32m    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차[m
+[32m+[m[41m    [m
+[32m+[m[32m    # 3. 직무별 현재 주차 스킬 빈도 데이터 조회[m
+[32m+[m[32m    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()[m
+[32m+[m[32m    if not job_role:[m
+[32m+[m[32m        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")[m
+[32m+[m[32m    job_role_id = job_role.id[m
+[32m+[m[32m    posts = db.query([m
+[32m+[m[32m        JobPost.posting_date,[m
+[32m+[m[32m        getattr(JobPost, field)[m
+[32m+[m[32m    ).filter([m
+[32m+[m[32m        and_([m
+[32m+[m[32m            JobPost.job_required_skill_id == job_role_id,[m
+[32m+[m[32m            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))[m
+[32m+[m[32m        )[m
+[32m+[m[32m    ).all()[m
+[32m+[m[41m    [m
+[32m+[m[32m    from collections import Counter[m
+[32m+[m[32m    skill_counter = Counter()[m
+[32m+[m[32m    for row in posts:[m
+[32m+[m[32m        posting_date, field_value = row.posting_date, row[1][m
+[32m+[m[41m        [m
+[32m+[m[32m        # 현재 주차의 공고만 처리[m
+[32m+[m[32m        post_week = posting_date.isocalendar()[1][m
+[32m+[m[32m        if post_week == current_week:[m
+[32m+[m[32m                        # 필드 타입에 따른 처리[m
+[32m+[m[32m            if field == "tech_stack":[m
+[32m+[m[32m                # tech_stack은 문자열 필드[m
+[32m+[m[32m                if isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[32m            else:[m
+[32m+[m[32m                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드[m
+[32m+[m[32m                if isinstance(field_value, list):[m
+[32m+[m[32m                    skills = [str(skill).strip() for skill in field_value if skill][m
+[32m+[m[32m                elif isinstance(field_value, str) and field_value.strip():[m
+[32m+[m[32m                    # JSON 문자열인 경우 파싱 시도[m
+[32m+[m[32m                    try:[m
+[32m+[m[32m                        import json[m
+[32m+[m[32m                        parsed = json.loads(field_value)[m
+[32m+[m[32m                        if isinstance(parsed, list):[m
+[32m+[m[32m                            skills = [str(skill).strip() for skill in parsed if skill][m
+[32m+[m[32m                    except:[m
+[32m+[m[32m                        # 파싱 실패 시 문자열로 처리[m
+[32m+[m[32m                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()][m
+[32m+[m[41m            [m
+[32m+[m[32m            # 스킬명 길이 제한 (500자)[m
+[32m+[m[32m            if skills:[m
+[32m+[m[32m                limited_skills = [][m
+[32m+[m[32m                for skill in skills:[m
+[32m+[m[32m                    if len(skill) > 500:[m
+[32m+[m[32m                        skill = skill[:497] + "..."  # 500자로 제한[m
+[32m+[m[32m                    limited_skills.append(skill)[m
+[32m+[m[32m                skill_counter.update(limited_skills)[m
+[32m+[m[32m    # 4. 강점/약점 비교 및 응답 생성 (현재 주차만)[m
+[32m+[m[32m    response = [][m
+[32m+[m[32m    for skill, count in skill_counter.items():[m
+[32m+[m[32m        status = "강점" if skill in my_skill_set else "약점"[m
+[32m+[m[32m        response.append(ResumeSkillComparison([m
+[32m+[m[32m            skill=skill, count=count, status=status, week=current_week, date=current_date.date()[m
+[32m+[m[32m        ))[m
+[32m+[m[32m    return response[m
+[32m+[m
+[32m+[m[32m@router.get("/gap-analysis", response_class=JSONResponse,[m
+[32m+[m[32m    summary="GPT 기반 갭차이 분석",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32m사용자의 이력 정보와 선택한 직무(카테고리)를 바탕으로 GPT(OpenRouter) 기반 갭차이 분석을 수행합니다.\n[m
+[32m+[m[32m- 분석 결과는 자연어 설명(gap_result)과 부족 역량 Top 5 리스트(top_skills)로 구성됩니다.\n[m
+[32m+[m[32m- 프론트엔드는 gap_result를 출력용으로, top_skills를 투두리스트 등 내부 활용에 사용할 수 있습니다.\n[m
+[32m+[m[32m- LLM 호출 실패 시 에러 메시지가 반환될 수 있습니다.[m
+[32m+[m[32m"""[m
+[32m+[m[32m)[m
+[32m+[m[32mdef gap_analysis_endpoint([m
+[32m+[m[32m    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[32m+[m[32m    db: Session = Depends(get_db),[m
+[32m+[m[32m    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    사용자의 이력 정보와 선택한 직무를 바탕으로 LLM 기반 갭차이 분석을 수행합니다.[m
+[32m+[m[32m    분석 결과는 자연어 설명과 부족 역량 Top 5 리스트로 구성됩니다.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        user_id = getattr(current_user, "id", None)[m
+[32m+[m[32m        if user_id is None:[m
+[32m+[m[32m            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")[m
+[32m+[m[32m        if hasattr(user_id, "__int__"):[m
+[32m+[m[32m            user_id = int(user_id)[m
+[32m+[m[32m        if not isinstance(user_id, int):[m
+[32m+[m[32m            raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")[m
+[32m+[m[32m        result = perform_gap_analysis_visualization(user_id, category, db=db)[m
+[32m+[m
+[32m+[m[32m        # 1. 프론트에 보여줄 자연어 결과[m
+[32m+[m[32m        gap_result = result["gap_result"][m
+[32m+[m
+[32m+[m[32m        # 2. 내부 To-Do 시스템으로 보낼 Top 5 스킬[m
+[32m+[m[32m        top_skills = result["top_skills"][m
+[32m+[m[32m        # 예시: 추후 비동기로 보내거나 DB에 저장[m
+[32m+[m[32m        # send_to_todo(user_id, top_skills)[m
+[32m+[m
+[32m+[m[32m        return {[m
+[32m+[m[32m            "gap_result": gap_result,      # 프론트에 출력할 자연어[m
+[32m+[m[32m            "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m    except ValueError as e:[m
+[32m+[m[32m        raise HTTPException(status_code=404, detail=str(e))[m
+[32m+[m[32m    except Exception as e:[m
+[32m+[m[32m        import traceback[m
+[32m+[m[32m        error_detail = f"갭 분석 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[32m+[m[32m        raise HTTPException(status_code=500, detail=error_detail)[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/skill_search",[m
+[32m+[m[32m    summary="스킬명 검색",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32mweekly_skill_stats 테이블에서 스킬명을 검색하여 해당 스킬의 통계 정보를 반환합니다.[m
+[32m+[m[32m- 부분 검색을 지원합니다 (예: "aw" 검색 시 "aws" 포함된 스킬들이 검색됨)[m
+[32m+[m[32m- count, 직무명, field_type 정보를 함께 반환합니다.[m
+[32m+[m
+[32m+[m[32m**응답 예시:**[m
+[32m+[m[32m```json[m
+[32m+[m[32m[[m
+[32m+[m[32m  {[m
+[32m+[m[32m    "skill": "AWS",[m
+[32m+[m[32m    "count": 15,[m
+[32m+[m[32m    "job_name": "백엔드 개발자",[m
+[32m+[m[32m    "field_type": "tech_stack",[m
+[32m+[m[32m    "week": 29,[m
+[32m+[m[32m    "date": "2025-01-15"[m
+[32m+[m[32m  }[m
+[32m+[m[32m][m
+[32m+[m[32m```[m
+[32m+[m[32m""",[m
+[32m+[m[32m    response_model=List[Dict[str, Any]][m
+[32m+[m[32m)[m
+[32m+[m[32mdef skill_search([m
+[32m+[m[32m    skill_name: str = Query(..., description="검색할 스킬명 (부분 검색 지원)"),[m
+[32m+[m[32m    db: Session = Depends(get_db)[m
+[32m+[m[32m):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    weekly_skill_stats 테이블에서 스킬명을 검색합니다.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        # 스킬명으로 검색 (대소문자 구분 없이 부분 검색, 만료되지 않은 공고 기반 통계만)[m
+[32m+[m[32m        stats = db.query([m
+[32m+[m[32m            WeeklySkillStatModel.skill,[m
+[32m+[m[32m            WeeklySkillStatModel.count,[m
+[32m+[m[32m            WeeklySkillStatModel.field_type,[m
+[32m+[m[32m            WeeklySkillStatModel.week,[m
+[32m+[m[32m            WeeklySkillStatModel.date,[m
+[32m+[m[32m            JobRequiredSkill.job_name[m
+[32m+[m[32m        ).join([m
+[32m+[m[32m            JobRequiredSkill,[m
+[32m+[m[32m            WeeklySkillStatModel.job_role_id == JobRequiredSkill.id[m
+[32m+[m[32m        ).filter([m
+[32m+[m[32m            WeeklySkillStatModel.skill.ilike(f"%{skill_name}%")[m
+[32m+[m[32m        ).order_by([m
+[32m+[m[32m            WeeklySkillStatModel.count.desc(),[m
+[32m+[m[32m            WeeklySkillStatModel.skill.asc()[m
+[32m+[m[32m        ).all()[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 응답 형식으로 변환[m
+[32m+[m[32m        result = [][m
+[32m+[m[32m        for stat in stats:[m
+[32m+[m[32m            result.append({[m
+[32m+[m[32m                "skill": stat.skill,[m
+[32m+[m[32m                "count": stat.count,[m
+[32m+[m[32m                "job_name": stat.job_name,[m
+[32m+[m[32m                "field_type": stat.field_type,[m
+[32m+[m[32m                "week": stat.week,[m
+[32m+[m[32m                "date": stat.date.isoformat() if stat.date else None[m
+[32m+[m[32m            })[m
+[32m+[m[41m        [m
+[32m+[m[32m        return result[m
+[32m+[m[41m        [m
+[32m+[m[32m    except Exception as e:[m
+[32m+[m[32m        import traceback[m
+[32m+[m[32m        error_detail = f"스킬 검색 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[32m+[m[32m        raise HTTPException(status_code=500, detail=error_detail)[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/roadmap_recommendations",[m
+[32m+[m[32m    summary="로드맵 추천",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32m사용자의 갭 분석 결과를 바탕으로 맞춤형 로드맵을 추천합니다.[m
+[32m+[m
+[32m+[m[32m- 갭 분석을 통해 부족한 스킬을 파악[m
+[32m+[m[32m- 트렌드 스킬과 사용자 스킬을 비교하여 점수 계산[m
+[32m+[m[32m- 점수가 높은 로드맵을 우선적으로 추천[m
+[32m+[m[32m- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)[m
+[32m+[m[32m- 부트캠프 limit개 + 강의 limit개를 반환[m
+[32m+[m[32m- type 파라미터로 부트캠프/강의 필터링 가능[m
+[32m+[m[32m""",[m
+[32m+[m[32m    response_model=List[Dict[str, Any]][m
+[32m+[m[32m)[m
+[32m+[m[32masync def get_roadmap_recommendations_endpoint([m
+[32m+[m[32m    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[32m+[m[32m    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),[m
+[32m+[m[32m    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),[m
+[32m+[m[32m    db: Session = Depends(get_db),[m
+[32m+[m[32m    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    사용자에게 맞는 로드맵을 추천합니다.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        # limit 검증[m
+[32m+[m[32m        if limit > 20:[m
+[32m+[m[32m            limit = 20[m
+[32m+[m[32m        elif limit < 1:[m
+[32m+[m[32m            limit = 1[m
+[32m+[m[41m            [m
+[32m+[m[32m        user_id = getattr(current_user, "id", None)[m
+[32m+[m[32m        if user_id is None:[m
+[32m+[m[32m            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 1. 갭 분석 수행[m
+[32m+[m[32m        gap_analysis_result = perform_gap_analysis_visualization(user_id, category, db)[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 2. 로드맵 추천 수행[m
+[32m+[m[32m        recommended_roadmaps = get_roadmap_recommendations([m
+[32m+[m[32m            user_id=user_id,[m
+[32m+[m[32m            category=category,[m
+[32m+[m[32m            gap_result_text=gap_analysis_result["gap_result"],[m
+[32m+[m[32m            db=db,[m
+[32m+[m[32m            limit=limit[m
+[32m+[m[32m        )[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 3. type별 필터링[m
+[32m+[m[32m        if type:[m
+[32m+[m[32m            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type][m
+[32m+[m[32m            return filtered_roadmaps[m
+[32m+[m[41m        [m
+[32m+[m[32m        return recommended_roadmaps[m
+[32m+[m[41m        [m
+[32m+[m[32m    except ValueError as e:[m
+[32m+[m[32m        raise HTTPException(status_code=404, detail=str(e))[m
+[32m+[m[32m    except Exception as e:[m
+[32m+[m[32m        import traceback[m
+[32m+[m[32m        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[32m+[m[32m        raise HTTPException(status_code=500, detail=error_detail)[m
+[32m+[m
+[32m+[m[32m@router.get([m
+[32m+[m[32m    "/roadmap_recommendations/direct",[m
+[32m+[m[32m    summary="직접 갭 분석 결과로 로드맵 추천",[m
+[32m+[m[32m    description="""[m
+[32m+[m[32m이미 수행된 갭 분석 결과를 직접 입력받아 로드맵을 추천합니다.[m
+[32m+[m
+[32m+[m[32m- 갭 분석 결과 텍스트를 직접 입력[m
+[32m+[m[32m- 별도의 갭 분석 과정 없이 바로 로드맵 추천[m
+[32m+[m[32m- 기존 갭 분석 결과를 재활용할 때 유용[m
+[32m+[m[32m- limit 파라미터로 각 타입별 추천 개수 조절 가능 (기본값: 10개씩, 총 20개)[m
+[32m+[m[32m- 부트캠프 limit개 + 강의 limit개를 반환[m
+[32m+[m[32m- type 파라미터로 부트캠프/강의 필터링 가능[m
+[32m+[m[32m""",[m
+[32m+[m[32m    response_model=List[Dict[str, Any]][m
+[32m+[m[32m)[m
+[32m+[m[32masync def get_roadmap_recommendations_direct([m
+[32m+[m[32m    category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),[m
+[32m+[m[32m    gap_result_text: str = Query(..., description="갭 분석 결과 텍스트"),[m
+[32m+[m[32m    limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),[m
+[32m+[m[32m    type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),[m
+[32m+[m[32m    db: Session = Depends(get_db),[m
+[32m+[m[32m    current_user: User = Depends(get_current_user)[m
+[32m+[m[32m):[m
+[32m+[m[32m    """[m
+[32m+[m[32m    직접 입력된 갭 분석 결과로 로드맵을 추천합니다.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        # limit 검증[m
+[32m+[m[32m        if limit > 20:[m
+[32m+[m[32m            limit = 20[m
+[32m+[m[32m        elif limit < 1:[m
+[32m+[m[32m            limit = 1[m
+[32m+[m[41m            [m
+[32m+[m[32m        user_id = getattr(current_user, "id", None)[m
+[32m+[m[32m        if user_id is None:[m
+[32m+[m[32m            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")[m
+[32m+[m[41m        [m
+[32m+[m[32m        # 로드맵 추천 수행[m
+[32m+[m[32m        recommended_roadmaps = get_roadmap_recommendations([m
+[32m+[m[32m            user_id=user_id,[m
+[32m+[m[32m            category=category,[m
+[32m+[m[32m            gap_result_text=gap_result_text,[m
+[32m+[m[32m            db=db,[m
+[32m+[m[32m            limit=limit[m
+[32m+[m[32m        )[m
+[32m+[m[41m        [m
+[32m+[m[32m        # type별 필터링[m
+[32m+[m[32m        if type:[m
+[32m+[m[32m            filtered_roadmaps = [roadmap for roadmap in recommended_roadmaps if roadmap.get('type') == type][m
+[32m+[m[32m            return filtered_roadmaps[m
+[32m+[m[41m        [m
+[32m+[m[32m        return recommended_roadmaps[m
+[32m+[m[41m        [m
+[32m+[m[32m    except Exception as e:[m
+[32m+[m[32m        import traceback[m
+[32m+[m[32m        error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"[m
+[32m+[m[32m        raise HTTPException(status_code=500, detail=error_detail)[m
