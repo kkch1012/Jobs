@@ -1,42 +1,57 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc
 from app.models.user import User
 from app.models.job_post import JobPost
+from app.models.user_similarity import UserSimilarity
 from app.services.similarity_scores import (
-    get_user_embedding, 
     summarize_user_for_embedding,
-    compute_similarity_scores,
-    get_top_job_ids
+    auto_compute_user_similarity
 )
 from typing import List
 import os
 import requests
 from app.utils.logger import recommender_logger
 
-def get_top_n_jobs_with_scores(user: User, jobs: List[JobPost], n: int = 20) -> List[tuple[JobPost, float]]:
+def get_top_n_jobs_with_scores(user: User, db: Session, n: int = 20) -> List[tuple[JobPost, float]]:
     """
     사용자와 가장 유사한 상위 N개의 채용 공고와 유사도 점수를 반환합니다.
-    similarity_scores.py의 compute_similarity_scores를 재사용합니다.
+    UserSimilarity 테이블에서 미리 계산된 유사도를 사용합니다.
     """
-    # 유효한 임베딩을 가진 채용공고만 필터링
-    valid_jobs = [j for j in jobs if hasattr(j, 'full_embedding') and j.full_embedding is not None]
-    if not valid_jobs:
+    try:
+        # UserSimilarity 테이블에서 상위 N개 유사도 조회
+        top_similarities = db.query(UserSimilarity, JobPost).join(
+            JobPost, UserSimilarity.job_post_id == JobPost.id
+        ).filter(
+            UserSimilarity.user_id == user.id
+        ).order_by(
+            desc(UserSimilarity.similarity)
+        ).limit(n).all()
+        
+        if not top_similarities:
+            # 유사도가 없으면 자동 계산 시도
+            recommender_logger.info(f"사용자 {user.id}의 유사도 데이터가 없어 자동 계산을 시도합니다.")
+            job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+            if job_posts:
+                auto_compute_user_similarity(user, db, job_posts)
+                # 다시 조회
+                top_similarities = db.query(UserSimilarity, JobPost).join(
+                    JobPost, UserSimilarity.job_post_id == JobPost.id
+                ).filter(
+                    UserSimilarity.user_id == user.id
+                ).order_by(
+                    desc(UserSimilarity.similarity)
+                ).limit(n).all()
+        
+        # 결과 반환
+        result = []
+        for similarity, job in top_similarities:
+            result.append((job, similarity.similarity))
+        
+        return result
+        
+    except Exception as e:
+        recommender_logger.error(f"유사도 조회 중 오류 발생: {str(e)}")
         return []
-    
-    # similarity_scores.py의 함수 사용
-    scores = compute_similarity_scores(user, valid_jobs)
-    
-    # 점수 기준으로 정렬하고 상위 N개 선택
-    scores.sort(key=lambda x: x[1], reverse=True)
-    top_scores = scores[:n]
-    
-    # JobPost 객체와 점수를 함께 반환
-    result = []
-    for job_id, score in top_scores:
-        job = next((j for j in valid_jobs if j.id == job_id), None)
-        if job:
-            result.append((job, score))
-    
-    return result
 
 def make_prompt(user_summary: str, job_list: List[JobPost]) -> str:
     """LLM 추천을 위한 프롬프트 생성"""
@@ -136,12 +151,8 @@ def recommend_jobs_for_user(user: User, db: Session, api_key: str, top_n: int = 
     Returns:
         추천 결과 문자열
     """
-    jobs = db.query(JobPost).all()
-    if not jobs:
-        return "현재 추천할 수 있는 채용 공고가 없습니다."
-
     # 유사도 순으로 정렬된 공고 리스트 가져오기 (유사도 점수 포함)
-    top_jobs_with_sim = get_top_n_jobs_with_scores(user, jobs, n=top_n)
+    top_jobs_with_sim = get_top_n_jobs_with_scores(user, db, n=top_n)
 
     if not top_jobs_with_sim:
         return "회원님과 유사한 채용 공고를 찾지 못했습니다."

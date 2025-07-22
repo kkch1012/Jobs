@@ -67,14 +67,9 @@ def get_recommended_job_ids(
         )
     
     try:
-        from app.models.job_post import JobPost
         from app.schemas.job_post import JobPostSimpleResponse
-        
-        jobs = db.query(JobPost).all()
-        if not jobs:
-            return {"recommended_jobs": [], "message": "현재 추천할 수 있는 채용 공고가 없습니다."}
 
-        top_jobs_with_sim = get_top_n_jobs_with_scores(current_user, jobs, n=20)
+        top_jobs_with_sim = get_top_n_jobs_with_scores(current_user, db, n=20)
 
         if not top_jobs_with_sim:
             return {"recommended_jobs": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
