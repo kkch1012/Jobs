@@ -20,7 +20,7 @@ class CommonUpdate(BaseModel):
 class RoadmapBase(CommonBase):
     start_date: Optional[datetime] = Field(None, description="시작일")
     end_date: Optional[datetime] = Field(None, description="마감일")
-    status: str = Field(..., description="진행 상태 (예: 진행 중, 완료 등)")
+    status: Optional[str] = Field(None, description="진행 상태 (예: 진행 중, 완료 등)")
     deadline: Optional[datetime] = Field(None, description="마감일(선택)")
     location: Optional[str] = Field(None, description="장소")
     onoff: Optional[str] = Field(None, description="온/오프/온오프")
