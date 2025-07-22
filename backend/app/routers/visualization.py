@@ -71,62 +71,66 @@ def weekly_skill_frequency(
     if start_week > end_week:
         raise HTTPException(status_code=400, detail="시작 주차는 마감 주차보다 작거나 같아야 합니다.")
     
-    # 3. 해당 직무id로 JobPost 필터링 & 주차 범위 집계 (만료되지 않은 공고만)
-    posts = db.query(
-        JobPost.posting_date,
-        getattr(JobPost, field)
+    # 3. WeeklySkillStat 테이블에서 주차 범위 데이터 조회
+    stats = db.query(
+        WeeklySkillStatModel.week,
+        WeeklySkillStatModel.skill,
+        WeeklySkillStatModel.count,
+        WeeklySkillStatModel.date
     ).filter(
         and_(
-            JobPost.job_required_skill_id == job_role_id,
-            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
+            WeeklySkillStatModel.job_role_id == job_role_id,
+            WeeklySkillStatModel.field_type == field,
+            WeeklySkillStatModel.week >= start_week,
+            WeeklySkillStatModel.week <= end_week
         )
     ).all()
 
-    # 4. 주차별 기술 키워드 카운트
+    print(f"DEBUG: 조회 범위 - {year}년 {start_week}주차 ~ {end_week}주차")
+    print(f"DEBUG: 총 {len(stats)}개의 스킬 통계 데이터")
+    
+    # 4. 주차별 기술 키워드 카운트 (합산)
     week_skill_counter = defaultdict(Counter)
-    for row in posts:
-        posting_date, field_value = row.posting_date, row[1]
-        
-        # 조회 범위 내의 주차만 처리
-        post_year, post_week = posting_date.isocalendar()[0], posting_date.isocalendar()[1]
-        if post_year == year and start_week <= post_week <= end_week:
-            skills = []
-            
-            # 필드 타입에 따른 처리
-            if field == "tech_stack":
-                # tech_stack은 문자열 필드
-                if isinstance(field_value, str) and field_value.strip():
-                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-            else:
-                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
-                if isinstance(field_value, list):
-                    skills = [str(skill).strip() for skill in field_value if skill]
-                elif isinstance(field_value, str) and field_value.strip():
-                    # JSON 문자열인 경우 파싱 시도
-                    try:
-                        import json
-                        parsed = json.loads(field_value)
-                        if isinstance(parsed, list):
-                            skills = [str(skill).strip() for skill in parsed if skill]
-                    except:
-                        # 파싱 실패 시 문자열로 처리
-                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-            
-            if skills:
-                week_skill_counter[post_week].update(skills)
-
-    # 5. 결과 응답 (주차별)
-    response = []
+    
+    for stat in stats:
+        print(f"DEBUG: {stat.week}주차 스킬 '{stat.skill}' 카운트 {stat.count}")
+        week_skill_counter[stat.week].update([stat.skill] * stat.count)
+    
+    print(f"DEBUG: 합산 후 주차별 카운터: {dict(week_skill_counter)}")
+    
+    # 5. 주차별 평균 계산
+    week_avg_counter = defaultdict(Counter)
+    week_day_counts = defaultdict(int)  # 각 주차의 유니크 날짜 수
+    
+    # 각 주차의 유니크 날짜 수 계산
+    for stat in stats:
+        week_day_counts[stat.week] = len(set([s.date for s in stats if s.week == stat.week]))
+    
+    print(f"DEBUG: 주차별 유니크 날짜 수: {dict(week_day_counts)}")
+    
+    # 평균 계산
     for week, counter in week_skill_counter.items():
+        day_count = week_day_counts[week]
+        if day_count > 0:
+            for skill, total_count in counter.items():
+                avg_count = round(total_count / day_count)  # 반올림해서 int로
+                week_avg_counter[week][skill] = avg_count
+                print(f"DEBUG: {week}주차 '{skill}' 평균: {total_count}/{day_count} = {avg_count}")
+    
+    print(f"DEBUG: 평균 계산 후 주차별 카운터: {dict(week_avg_counter)}")
+
+    # 6. 결과 응답 (주차별 평균)
+    response = []
+    for week, counter in week_avg_counter.items():
         # 해당 주차의 시작일 계산
         week_start_date = datetime.strptime(f"{year}-W{week:02d}-1", "%Y-W%W-%w").date()
         
-        for skill, count in counter.items():
+        for skill, avg_count in counter.items():
             response.append(WeeklySkillStat(
                 week=week, 
                 date=week_start_date, 
                 skill=skill, 
-                count=count
+                count=avg_count  # 평균값 사용
             ))
     # count 기준 내림차순 정렬
     response = sorted(response, key=lambda x: x.count, reverse=True)

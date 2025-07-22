@@ -2,7 +2,6 @@
 직무 추천 로직 모듈
 사용자의 기술 스택과 시장 트렌드를 분석하여 최적의 직무를 추천합니다.
 """
-import pandas as pd
 from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -63,7 +62,7 @@ def get_job_categories(db: Session) -> List[str]:
         ]
 
 
-def get_trend_skills_by_category(db: Session, category: str, limit: int = 200) -> List[str]:
+def get_trend_skills_by_category(db: Session, category: str, limit: int = 200) -> List[Dict[str, any]]:
     """
     해당 직무 카테고리에 대한 트렌드 스킬 리스트 조회
     
@@ -73,21 +72,21 @@ def get_trend_skills_by_category(db: Session, category: str, limit: int = 200) -
         limit: 반환할 스킬 개수 (기본값: 200)
         
     Returns:
-        트렌드 스킬 리스트 (인기도 순)
+        트렌드 스킬 + count까지 함께 반환 (리스트[dict])
     """
     try:
         query = text("""
-            SELECT wss.skill, jrs.job_name, SUM(wss.count) AS total_count
+            SELECT wss.skill, SUM(wss.count) AS total_count
             FROM weekly_skill_stats wss
             JOIN job_required_skills jrs ON wss.job_role_id = jrs.id
             WHERE jrs.job_name = :category
-            GROUP BY wss.skill, jrs.job_name
+            GROUP BY wss.skill
             ORDER BY total_count DESC
             LIMIT :limit
         """)
         
         result = db.execute(query, {"category": category, "limit": limit})
-        skills = [row[0] for row in result.fetchall()]
+        skills = [{"skill": row[0], "total_count": row[1]} for row in result.fetchall()]
         
         app_logger.info(f"직무 '{category}'의 트렌드 스킬 {len(skills)}개 조회 완료")
         return skills
@@ -97,7 +96,7 @@ def get_trend_skills_by_category(db: Session, category: str, limit: int = 200) -
         return []
 
 
-def calculate_skill_score(user_skills_str: str, trend_skills: List[str], verbose: bool = False) -> Tuple[float, List[Dict]]:
+def calculate_skill_score(user_skills_str: str, trend_skills: List[Dict[str, any]], verbose: bool = False) -> Tuple[float, List[Dict]]:
     """
     사용자 기술 스택과 트렌드 스킬을 비교하여 점수 계산
     
@@ -110,7 +109,7 @@ def calculate_skill_score(user_skills_str: str, trend_skills: List[str], verbose
         (총 점수, 스킬별 상세 정보)
     """
     score = 0.0
-    proficiency_weights = {"하": 1.0, "중": 1.2, "상": 2.0}
+    proficiency_weights = {"하": 1.0, "중": 1.4, "상": 1.8}
     skill_details = []
 
     # 사용자 기술 스택 파싱
@@ -122,20 +121,19 @@ def calculate_skill_score(user_skills_str: str, trend_skills: List[str], verbose
             user_skill_map[name.strip().lower()] = prof.strip(")").strip()
 
     # 트렌드 스킬과 매칭하여 점수 계산
-    for idx, trend_skill in enumerate(trend_skills):
-        trend_score = len(trend_skills) - idx  # 순위에 따른 점수
-        skill_key = trend_skill.strip().lower()
+    for item in trend_skills:
+        skill_key = item["skill"].strip().lower()
+        count = item["total_count"]
 
         if skill_key in user_skill_map:
             prof = user_skill_map[skill_key]
             weight = proficiency_weights.get(prof, 1.0)
-            contribution = trend_score * weight
+            contribution = count * weight
             score += contribution
             
             skill_details.append({
                 "skill": skill_key,
-                "rank": idx + 1,
-                "base_score": trend_score,
+                "count": count,
                 "proficiency": prof,
                 "weight": weight,
                 "contribution": contribution
@@ -146,14 +144,14 @@ def calculate_skill_score(user_skills_str: str, trend_skills: List[str], verbose
         app_logger.info("==== 스킬별 기여도 ====")
         for detail in skill_details:
             app_logger.info(
-                f"- {detail['skill']} (순위 {detail['rank']}, 숙련도: {detail['proficiency']}) "
-                f"→ {detail['base_score']}점 × {detail['weight']} = {detail['contribution']:.2f}"
+                f"- {detail['skill']} (빈도 {detail['count']}, 숙련도: {detail['proficiency']}) "
+                f"→ {detail['count']} × {detail['weight']} = {detail['contribution']:.2f}"
             )
 
     return score, skill_details
 
 
-def recommend_best_job(user_skills: str, trend_skill_dict: Dict[str, List[str]], db: Session, verbose: bool = False) -> Dict:
+def recommend_best_job(user_skills: str, trend_skill_dict: Dict[str, List[Dict]], db: Session, verbose: bool = False) -> Dict:
     """
     사용자 기술 스택에 가장 적합한 직무 추천
     
@@ -202,7 +200,7 @@ def recommend_best_job(user_skills: str, trend_skill_dict: Dict[str, List[str]],
     }
 
 
-def generate_trend_skill_dict(db: Session) -> Dict[str, List[str]]:
+def generate_trend_skill_dict(db: Session) -> Dict[str, List[Dict]]:
     """
     전체 직무의 트렌드 스킬 딕셔너리 생성
     
@@ -210,7 +208,7 @@ def generate_trend_skill_dict(db: Session) -> Dict[str, List[str]]:
         db: 데이터베이스 세션
         
     Returns:
-        직무별 트렌드 스킬 딕셔너리
+        전체 직무의 트렌드 스킬 + count 딕셔너리
     """
     trend_dict = {}
     job_categories = get_job_categories(db)

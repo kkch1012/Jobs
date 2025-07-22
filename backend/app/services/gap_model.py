@@ -447,34 +447,25 @@ def perform_gap_analysis_visualization(user_id: int, category: str, db: Session)
     try:
         logger.info(f"시각화용 갭 분석 시작 - 사용자 ID: {user_id}, 카테고리: {category}")
         
-        # 1. 트렌드 스킬 조회
         skill_order = get_trend_skills_by_category(category, db)
         logger.info(f"트렌드 스킬 조회 결과: {len(skill_order)}개 스킬")
-        logger.info(f"상위 10개 스킬: {skill_order[:10]}")
         skill_trend = skill_order[:20]  # 상위 20개만 사용
 
-        # 2. 사용자 정보 조회
         user_data = get_user_summary(user_id, db)
         if not user_data:
             logger.error(f"사용자 {user_id}를 찾을 수 없습니다.")
             raise ValueError(f"User {user_id} not found")
         
         logger.info(f"사용자 데이터 조회 성공: {user_data.get('name', 'Unknown')}")
-        logger.info(f"사용자 스킬: {user_data.get('skills_with_proficiency', '없음')}")
 
-        # 3. 프롬프트 생성
         prompt = make_gap_analysis_prompt_visualization(user_data, skill_trend, category)
         logger.info("시각화용 프롬프트 생성 완료")
         
-        # 4. LLM 호출
         gap_result_text = call_llm_for_gap_analysis(prompt)
         logger.info("LLM 분석 완료")
-        logger.info(f"LLM 응답 길이: {len(gap_result_text)}")
         
-        # 5. 결과 추출
         top_skills = extract_top_gap_items(gap_result_text)
         logger.info(f"추출된 Top 스킬 (시각화용): {len(top_skills)}개")
-        logger.info(f"추출된 스킬: {top_skills}")
 
         return {
             "user_id": user_id,
