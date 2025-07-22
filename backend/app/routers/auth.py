@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from datetime import timedelta
 
 from app.database import get_db
 from app.models.user import User
@@ -34,7 +35,10 @@ def login_by_id(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
     if getattr(user, 'signup_type', None) != "id":
         raise HTTPException(status_code=400, detail="아이디 기반 회원이 아닙니다.")
-    access_token = create_access_token({"sub": str(user.id)})
+    access_token = create_access_token(
+        {"sub": str(user.id)}, 
+        expires_delta=timedelta(days=7)  # 7일로 토큰 만료 시간 설정
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -55,5 +59,8 @@ def social_login(data: SocialLoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
     if getattr(user, 'signup_type', None) != "email":
         raise HTTPException(status_code=400, detail="소셜 로그인 회원이 아닙니다.")
-    access_token = create_access_token({"sub": str(user.id)})
+    access_token = create_access_token(
+        {"sub": str(user.id)}, 
+        expires_delta=timedelta(days=7)  # 7일로 토큰 만료 시간 설정
+    )
     return {"access_token": access_token, "token_type": "bearer"}

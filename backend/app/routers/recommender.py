@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
-from app.services.recommender import recommend_jobs_for_user, get_top_n_jobs, make_prompt, call_qwen_api
-from app.services.similarity_scores import get_user_embedding
+from app.services.recommender import recommend_jobs_for_user, get_top_n_jobs_with_scores, make_prompt, call_qwen_api
+
+from app.services.jobs_gap import recommend_job_for_user, get_job_recommendation_simple
 from app.utils.dependencies import get_current_user
 import os
 import re
@@ -73,11 +74,13 @@ def get_recommended_job_ids(
         if not jobs:
             return {"recommended_jobs": [], "message": "현재 추천할 수 있는 채용 공고가 없습니다."}
 
-        user_embedding = get_user_embedding(current_user)
-        top_jobs = get_top_n_jobs(user_embedding, jobs, n=20)
+        top_jobs_with_sim = get_top_n_jobs_with_scores(current_user, jobs, n=20)
 
-        if not top_jobs:
+        if not top_jobs_with_sim:
             return {"recommended_jobs": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
+
+        # JobPost 객체만 추출
+        top_jobs = [job for job, _ in top_jobs_with_sim]
 
         # ID 추출 전용 프롬프트 생성
         job_ids_text = "\n".join([f"공고 ID: {job.id}" for job in top_jobs])  # 20개 전송
@@ -114,11 +117,11 @@ def get_recommended_job_ids(
                     raise ValueError("JSON 형식을 찾을 수 없습니다.")
             except Exception as e:
                 print(f"JSON 파싱 실패: {e}")
-                # 파싱 실패 시 상위 5개 ID 반환
-                recommended_job_ids = [job.id for job in top_jobs[:5]]
+                # 파싱 실패 시 상위 5개 ID 반환 (유사도 순)
+                recommended_job_ids = [job.id for job, _ in top_jobs_with_sim[:5]]
         else:
-            # LLM 실패 시 상위 5개 ID 반환
-            recommended_job_ids = [job.id for job in top_jobs[:5]]
+            # LLM 실패 시 상위 5개 ID 반환 (유사도 순)
+            recommended_job_ids = [job.id for job, _ in top_jobs_with_sim[:5]]
         
         # 추천된 ID에 해당하는 채용공고 상세 정보 조회 (유사도 포함)
         from app.models.user_similarity import UserSimilarity
@@ -140,6 +143,9 @@ def get_recommended_job_ids(
                 job_response = JobPostSimpleResponse.model_validate(job)
                 job_response.similarity = similarity
                 job_responses.append(job_response)
+        
+        # 유사도 점수를 기준으로 내림차순 정렬 (높은 적합도 순)
+        job_responses.sort(key=lambda x: x.similarity or 0, reverse=True)
         
         return {
             "recommended_jobs": job_responses,
@@ -219,7 +225,11 @@ def generate_job_explanations(
 2. 사용자의 어떤 경험이나 기술이 이 공고와 매칭되는지
 3. 지원 시 주의할 점이나 준비사항
 
-각 공고별로 명확하게 구분하여 설명해주세요.
+주의사항:
+- 마크다운 형식(**, ### 등)을 사용하지 말고 일반 텍스트로 작성해주세요
+- 각 공고별로 명확하게 구분하여 설명해주세요
+- 줄바꿈을 적절히 사용하여 읽기 쉽게 작성해주세요
+- 번호나 기호를 사용하여 구조화해주세요
 """
 
         # LLM API 호출
@@ -347,4 +357,73 @@ def get_paginated_recommended_jobs(
         raise HTTPException(
             status_code=500, 
             detail=f"페이지별 추천 채용공고 조회 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.get(
+    "/job",
+    summary="직무 추천",
+    description="""
+현재 로그인된 사용자의 기술 스택을 분석하여 최적의 직무를 추천합니다.
+
+- **기술 스택 분석**: 사용자가 등록한 기술과 숙련도를 분석
+- **시장 트렌드 반영**: weekly_skill_stats 테이블의 데이터를 기반으로 시장 트렌드 반영
+- **점수 계산**: 기술 매칭도와 숙련도 가중치를 고려한 점수 계산
+- **응답**: 추천 직무명, 점수, 상세 분석 결과
+"""
+)
+def recommend_job_for_current_user(
+    verbose: bool = Query(False, description="상세 분석 결과 포함 여부"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        result = recommend_job_for_user(current_user, db, verbose=verbose)
+        
+        if result["recommended_job"] is None:
+            return {
+                "success": False,
+                "message": result.get("message", "직무 추천에 실패했습니다."),
+                "data": None
+            }
+        
+        return {
+            "success": True,
+            "message": "직무 추천이 완료되었습니다.",
+            "data": result
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"직무 추천 중 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.get(
+    "/job/simple",
+    summary="간단한 직무 추천",
+    description="""
+현재 로그인된 사용자에게 추천 직무명만 반환합니다.
+
+- **응답**: 추천 직무명 문자열만 반환
+- **용도**: 간단한 직무 추천이 필요한 경우 사용
+"""
+)
+def get_simple_job_recommendation(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        recommended_job = get_job_recommendation_simple(current_user, db)
+        
+        return {
+            "recommended_job": recommended_job,
+            "user_id": current_user.id
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"직무 추천 중 오류가 발생했습니다: {str(e)}"
         )

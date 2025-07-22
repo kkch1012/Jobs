@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -43,19 +43,43 @@ class RoadmapUpdate(CommonUpdate):
 class RoadmapResponse(RoadmapBase):
     id: int
 
+    @computed_field
+    @property
+    def start_date_display(self) -> Optional[str]:
+        """시작일을 YYYY-MM-DD 형식으로 표시"""
+        if self.start_date:
+            return self.start_date.strftime("%Y-%m-%d")
+        return None
+
+    @computed_field
+    @property
+    def end_date_display(self) -> Optional[str]:
+        """종료일을 YYYY-MM-DD 형식으로 표시"""
+        if self.end_date:
+            return self.end_date.strftime("%Y-%m-%d")
+        return None
+
+    @computed_field
+    @property
+    def deadline_display(self) -> Optional[str]:
+        """마감일을 YYYY-MM-DD 형식으로 표시"""
+        if self.deadline:
+            return self.deadline.strftime("%Y-%m-%d")
+        return None
+
     class Config:
         from_attributes = True
 
 # ===== 강의용 스키마 =====
 class CourseBase(CommonBase):
-    link: Optional[str] = Field(None, description="강의 링크")
+    url: Optional[str] = Field(None, description="강의 링크")
     price: Optional[str] = Field(None, description="가격")
 
 class CourseCreate(CourseBase):
     pass
 
 class CourseUpdate(CommonUpdate):
-    link: Optional[str] = None
+    url: Optional[str] = None
     price: Optional[str] = None
 
 class CourseResponse(CourseBase):

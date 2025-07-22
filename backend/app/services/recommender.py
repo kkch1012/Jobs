@@ -1,33 +1,42 @@
-import numpy as np
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.job_post import JobPost
-from app.services.similarity_scores import get_user_embedding, summarize_user_for_embedding
-from sklearn.metrics.pairwise import cosine_similarity
+from app.services.similarity_scores import (
+    get_user_embedding, 
+    summarize_user_for_embedding,
+    compute_similarity_scores,
+    get_top_job_ids
+)
 from typing import List
 import os
 import requests
 from app.utils.logger import recommender_logger
 
-def get_top_n_jobs(user_embedding: np.ndarray, jobs: List[JobPost], n: int = 20) -> List[JobPost]:
+def get_top_n_jobs_with_scores(user: User, jobs: List[JobPost], n: int = 20) -> List[tuple[JobPost, float]]:
     """
-    사용자 임베딩과 가장 유사한 상위 N개의 채용 공고 리스트를 반환합니다.
+    사용자와 가장 유사한 상위 N개의 채용 공고와 유사도 점수를 반환합니다.
+    similarity_scores.py의 compute_similarity_scores를 재사용합니다.
     """
+    # 유효한 임베딩을 가진 채용공고만 필터링
     valid_jobs = [j for j in jobs if hasattr(j, 'full_embedding') and j.full_embedding is not None]
     if not valid_jobs:
         return []
     
-    job_embeddings = np.vstack([
-        np.array(j.full_embedding) if not isinstance(j.full_embedding, np.ndarray) else j.full_embedding
-        for j in valid_jobs
-    ])
+    # similarity_scores.py의 함수 사용
+    scores = compute_similarity_scores(user, valid_jobs)
     
-    sims = cosine_similarity([user_embedding], job_embeddings)[0]
-    jobs_with_sim = list(zip(valid_jobs, sims))
-    jobs_with_sim.sort(key=lambda x: x[1], reverse=True)
+    # 점수 기준으로 정렬하고 상위 N개 선택
+    scores.sort(key=lambda x: x[1], reverse=True)
+    top_scores = scores[:n]
     
-    # 유사도 점수는 정렬에만 사용하고, 최종적으로는 JobPost 객체만 반환합니다.
-    return [job for job, _ in jobs_with_sim[:n]]
+    # JobPost 객체와 점수를 함께 반환
+    result = []
+    for job_id, score in top_scores:
+        job = next((j for j in valid_jobs if j.id == job_id), None)
+        if job:
+            result.append((job, score))
+    
+    return result
 
 def make_prompt(user_summary: str, job_list: List[JobPost]) -> str:
     """LLM 추천을 위한 프롬프트 생성"""
@@ -47,7 +56,10 @@ def make_prompt(user_summary: str, job_list: List[JobPost]) -> str:
         "[요청사항]\n"
         "- 아래 공고 중 현실적으로 맞지 않는 조건(병역특례, 경력 등)은 제외\n"
         "- 숙련도 기준 가중치 반영 (상=3, 중=2, 하=1)\n"
-        "- 최적의 공고 5개를 아래 양식으로 출력\n\n"
+        "- 최적의 공고 5개를 추천해주세요\n"
+        "- 마크다운 형식(**, ### 등)을 사용하지 말고 일반 텍스트로 작성해주세요\n"
+        "- 각 공고별로 명확하게 구분하여 설명해주세요\n"
+        "- 줄바꿈을 적절히 사용하여 읽기 쉽게 작성해주세요\n\n"
         "[채용 공고 목록]\n" + jobs_text
     )
 
@@ -128,13 +140,14 @@ def recommend_jobs_for_user(user: User, db: Session, api_key: str, top_n: int = 
     if not jobs:
         return "현재 추천할 수 있는 채용 공고가 없습니다."
 
-    user_embedding = get_user_embedding(user)
-    
-    # 유사도 순으로 정렬된 공고 리스트 가져오기
-    top_jobs = get_top_n_jobs(user_embedding, jobs, n=top_n)
+    # 유사도 순으로 정렬된 공고 리스트 가져오기 (유사도 점수 포함)
+    top_jobs_with_sim = get_top_n_jobs_with_scores(user, jobs, n=top_n)
 
-    if not top_jobs:
+    if not top_jobs_with_sim:
         return "회원님과 유사한 채용 공고를 찾지 못했습니다."
+
+    # JobPost 객체만 추출
+    top_jobs = [job for job, _ in top_jobs_with_sim]
 
     user_summary = summarize_user_for_embedding(user)
     prompt = make_prompt(user_summary, top_jobs)
@@ -152,8 +165,8 @@ def recommend_jobs_for_user(user: User, db: Session, api_key: str, top_n: int = 
             "대신 회원님의 이력서와 가장 유사도가 높은 공고를 순서대로 보여드릴게요!\n\n"
             "--- 유사도 순 추천 목록 ---\n"
         )
-        # 유사도 점수를 제외하고 회사명과 직무명만 표시합니다.
-        for job in top_jobs[:5]:
-             fallback_message += f"✅ **{job.company_name} - {job.title}**\n"
+        # 유사도 점수와 함께 회사명과 직무명을 표시합니다.
+        for job, similarity in top_jobs_with_sim[:5]:
+             fallback_message += f"✅ **{job.company_name} - {job.title}** (적합도: {similarity:.2f})\n"
 
         return fallback_message
