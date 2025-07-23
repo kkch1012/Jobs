@@ -135,6 +135,9 @@ async def get_daily_stats(
         
     except Exception as e:
         logger.error(f"일간 스킬 통계 조회 실패: {str(e)}")
+        logger.error(f"요청된 직무명: {job_name}")
+        logger.error(f"요청된 필드 타입: {field_type}")
+        logger.error(f"요청된 날짜: {date}")
         raise HTTPException(
             status_code=500,
             detail=f"일간 통계 조회 중 오류가 발생했습니다: {str(e)}"
@@ -349,6 +352,136 @@ def weekly_skill_frequency_current(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
+
+@router.get(
+    "/weekly_skill_frequency_comparison",
+    operation_id="weekly_skill_frequency_comparison",
+    summary="직무별 2주차 스킬 빈도 비교 분석",
+    description="""
+선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, **2개 주차의 스킬 빈도 차이**를 분석하여 반환합니다.
+
+- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
+- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
+    - tech_stack, qualifications, preferences, required_skills, preferred_skills
+- `week1`, `week2`, `year` 파라미터로 비교할 2개 주차를 지정할 수 있습니다.
+- 반환 데이터는 전체 스킬 목록과 함께 다음 4개 필터링된 결과를 포함합니다:
+    - **biggest_difference**: 절대값 차이가 가장 큰 스킬
+    - **smallest_difference**: 절대값 차이가 가장 작은 스킬
+    - **biggest_percentage**: 퍼센트 변화가 가장 큰 스킬
+    - **smallest_percentage**: 퍼센트 변화가 가장 작은 스킬
+
+**응답 예시:**
+```json
+{
+  "all_skills": [
+    { "skill": "Python", "week1_count": 15, "week2_count": 20, "difference": 5, "percentage_change": 33.33 }
+  ],
+  "biggest_difference": { "skill": "Java", "week1_count": 5, "week2_count": 15, "difference": 10, "percentage_change": 200.0 },
+  "smallest_difference": { "skill": "SQL", "week1_count": 8, "week2_count": 8, "difference": 0, "percentage_change": 0.0 },
+  "biggest_percentage": { "skill": "React", "week1_count": 2, "week2_count": 10, "difference": 8, "percentage_change": 400.0 },
+  "smallest_percentage": { "skill": "SQL", "week1_count": 8, "week2_count": 8, "difference": 0, "percentage_change": 0.0 }
+}
+""",
+    response_model=Dict[str, Any]
+)
+def weekly_skill_frequency_comparison(
+    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),
+    field: str = Query(
+        "tech_stack",
+        enum=[
+            "tech_stack", "qualifications", "preferences",
+            "required_skills", "preferred_skills"
+        ],
+        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
+    ),
+    week1: int = Query(..., ge=1, le=53, description="첫 번째 주차 (1-53)"),
+    week2: int = Query(..., ge=1, le=53, description="두 번째 주차 (1-53)"),
+    year: int = Query(..., description="조회할 연도"),
+    db: Session = Depends(get_db)
+):
+    try:
+        # StatisticsService 사용하여 각 주차별 데이터 조회
+        week1_data = StatisticsService.get_weekly_skill_frequency_range(
+            job_name, week1, week1, year, field, db
+        )
+        week2_data = StatisticsService.get_weekly_skill_frequency_range(
+            job_name, week2, week2, year, field, db
+        )
+        
+        # 스킬별 데이터 병합
+        skill_comparison = {}
+        
+        # week1 데이터 처리
+        for week_data in week1_data:
+            for skill_data in week_data["skills"]:
+                skill_name = skill_data["skill_name"]
+                if skill_name not in skill_comparison:
+                    skill_comparison[skill_name] = {"week1_count": 0, "week2_count": 0}
+                skill_comparison[skill_name]["week1_count"] = skill_data["frequency"]
+        
+        # week2 데이터 처리
+        for week_data in week2_data:
+            for skill_data in week_data["skills"]:
+                skill_name = skill_data["skill_name"]
+                if skill_name not in skill_comparison:
+                    skill_comparison[skill_name] = {"week1_count": 0, "week2_count": 0}
+                skill_comparison[skill_name]["week2_count"] = skill_data["frequency"]
+        
+        # 차이와 퍼센트 계산
+        all_skills = []
+        for skill_name, counts in skill_comparison.items():
+            week1_count = counts["week1_count"]
+            week2_count = counts["week2_count"]
+            difference = week2_count - week1_count
+            
+            # 퍼센트 변화 계산 (0으로 나누기 방지)
+            if week1_count == 0:
+                percentage_change = 100.0 if week2_count > 0 else 0.0
+            else:
+                percentage_change = (difference / week1_count) * 100
+            
+            skill_info = {
+                "skill": skill_name,
+                "week1_count": week1_count,
+                "week2_count": week2_count,
+                "difference": difference,
+                "percentage_change": round(percentage_change, 2)
+            }
+            all_skills.append(skill_info)
+        
+        # 필터링된 결과 찾기
+        if not all_skills:
+            return {
+                "all_skills": [],
+                "biggest_difference": None,
+                "smallest_difference": None,
+                "biggest_percentage": None,
+                "smallest_percentage": None
+            }
+        
+        # 절대값 차이 기준 정렬
+        sorted_by_difference = sorted(all_skills, key=lambda x: abs(x["difference"]), reverse=True)
+        biggest_difference = sorted_by_difference[0]
+        smallest_difference = sorted_by_difference[-1]
+        
+        # 퍼센트 변화 기준 정렬
+        sorted_by_percentage = sorted(all_skills, key=lambda x: abs(x["percentage_change"]), reverse=True)
+        biggest_percentage = sorted_by_percentage[0]
+        smallest_percentage = sorted_by_percentage[-1]
+        
+        return {
+            "all_skills": all_skills,
+            "biggest_difference": biggest_difference,
+            "smallest_difference": smallest_difference,
+            "biggest_percentage": biggest_percentage,
+            "smallest_percentage": smallest_percentage
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"스킬 비교 분석 실패: {str(e)}")
 
 @router.get(
     "/resume_vs_job_skill_trend",
