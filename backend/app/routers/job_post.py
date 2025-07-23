@@ -274,7 +274,7 @@ def get_job_post_detail(
                 )
             ).filter(
                 and_(
-                    JobPost.id == job_id_int,
+                    JobPost.id == job_id,
                     or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
                 )
             )
@@ -282,7 +282,7 @@ def get_job_post_detail(
             # 비로그인 사용자의 경우 유사도 없이 조회
             query = db.query(JobPost, null().label('similarity')).filter(
                 and_(
-                    JobPost.id == job_id_int,
+                    JobPost.id == job_id,
                     or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
                 )
             )
@@ -295,8 +295,8 @@ def get_job_post_detail(
         result = query.first()
         
         if not result:
-            app_logger.warning(f"채용공고를 찾을 수 없음: job_id={job_id_int}")
-            raise HTTPException(status_code=404, detail=f"ID {job_id_int}의 채용공고를 찾을 수 없습니다.")
+            app_logger.warning(f"채용공고를 찾을 수 없음: job_id={job_id}")
+            raise HTTPException(status_code=404, detail=f"ID {job_id}의 채용공고를 찾을 수 없습니다.")
 
         job, similarity = result
         
@@ -305,7 +305,7 @@ def get_job_post_detail(
         # 유사도 점수 설정
         response_item.similarity = similarity
         
-        app_logger.info(f"채용공고 상세 조회 완료: job_id={job_id_int}, 사용자: {current_user.id if current_user else '비로그인'}")
+        app_logger.info(f"채용공고 상세 조회 완료: job_id={job_id}, 사용자: {current_user.id if current_user else '비로그인'}")
         return response_item
         
     except HTTPException:
