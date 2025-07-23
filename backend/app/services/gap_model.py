@@ -174,6 +174,7 @@ def make_gap_analysis_prompt_visualization(user_data: Dict[str, Any], skill_tren
 
     return f"""
 당신은 채용 담당자를 위한 커리어 갭 분석 전문가입니다.
+모든 분석 결과는 반드시 한국어로 작성해주세요.
 
 [지원자 정보]
 이름: {name}
@@ -274,6 +275,7 @@ def make_gap_analysis_prompt_todo(user_data: Dict[str, Any], skill_trend: List[s
 
     return f"""
 당신은 채용 담당자를 위한 커리어 갭 분석 전문가입니다.
+모든 분석 결과는 반드시 한국어로 작성해주세요.
 
 [지원자 정보]
 이름: {name}
@@ -392,7 +394,7 @@ def call_llm_for_gap_analysis(prompt: str) -> str:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "당신은 채용 담당자를 위한 커리어 갭 분석 전문가입니다."},
+                {"role": "system", "content": "당신은 채용 담당자를 위한 커리어 갭 분석 전문가입니다. 모든 분석 결과는 반드시 한국어로 작성해주세요."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7

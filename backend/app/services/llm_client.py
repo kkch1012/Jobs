@@ -222,7 +222,7 @@ class OpenRouterClient:
         system_prompt = """
 당신은 취업과 직무 관련 정보를 제공하는 친근한 AI 어시스턴트입니다.
 사용자의 질문에 대해 도움이 되는 답변을 제공해주세요.
-한국어로 자연스럽게 응답해주세요.
+모든 응답은 반드시 한국어로 자연스럽게 작성해주세요.
 """
 
         messages: List[ChatCompletionMessageParam] = [

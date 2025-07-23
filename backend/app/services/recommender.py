@@ -75,7 +75,8 @@ def make_prompt(user_summary: str, job_list: List[JobPost]) -> str:
         "- 최적의 공고 5개를 추천해주세요\n"
         "- 마크다운 형식(**, ### 등)을 사용하지 말고 일반 텍스트로 작성해주세요\n"
         "- 각 공고별로 명확하게 구분하여 설명해주세요\n"
-        "- 줄바꿈을 적절히 사용하여 읽기 쉽게 작성해주세요\n\n"
+        "- 줄바꿈을 적절히 사용하여 읽기 쉽게 작성해주세요\n"
+        "- 모든 설명은 반드시 한국어로 작성해주세요\n\n"
         "[채용 공고 목록]\n" + jobs_text
     )
 
@@ -94,7 +95,7 @@ def call_qwen_api(prompt: str, api_key: str) -> str | None:
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": "너는 한국 채용 시장에 대해 잘 아는 최고의 채용 공고 추천 전문가야. 사용자에게 친근하고 명확한 어조로 설명해줘."},
+            {"role": "system", "content": "너는 한국 채용 시장에 대해 잘 아는 최고의 채용 공고 추천 전문가야. 사용자에게 친근하고 명확한 어조로 설명해줘. 모든 응답은 반드시 한국어로 해주세요."},
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.5,
