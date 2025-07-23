@@ -1,6 +1,10 @@
 import asyncio
 from datetime import datetime
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+
+# 환경변수 로드
+load_dotenv()
 from app.database import SessionLocal
 from app.models.skill import Skill
 from app.models.certificate import Certificate

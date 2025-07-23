@@ -23,4 +23,11 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+    # Redis 설정
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+    # Server URLs
+    FASTAPI_SERVER_URL: str = os.getenv("FASTAPI_SERVER_URL", "http://localhost:8000")
+    MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8001")
+
 settings = Settings()

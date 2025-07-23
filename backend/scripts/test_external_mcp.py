@@ -3,7 +3,11 @@ import httpx
 import json
 from datetime import datetime
 
-FASTAPI_SERVER_URL = "http://localhost:8000"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+FASTAPI_SERVER_URL = os.getenv("FASTAPI_SERVER_URL", "http://localhost:8000")
 
 async def test_llm_chat():
     print("\n💬 LLM 챗봇 테스트 중...")

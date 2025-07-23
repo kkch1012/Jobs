@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import Counter
 import pytz
 from app.database import get_db
@@ -19,10 +19,30 @@ from app.services.roadmap_model import get_roadmap_recommendations
 from app.services.statistics_service import StatisticsService
 from app.utils.text_utils import clean_markdown_text
 import logging
+from functools import lru_cache
+import hashlib
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
+
+# 캐시를 위한 전역 변수
+_gap_analysis_cache = {}
+_roadmap_cache = {}
+_cache_ttl = timedelta(hours=1)  # 1시간 캐시
+
+def get_cache_key(user_id: int, category: str, cache_type: str = "gap_analysis") -> str:
+    """캐시 키 생성"""
+    return f"{cache_type}:{user_id}:{category}"
+
+def is_cache_valid(cache_entry: Dict[str, Any]) -> bool:
+    """캐시가 유효한지 확인"""
+    if not cache_entry:
+        return False
+    created_time = cache_entry.get('created_time')
+    if not created_time:
+        return False
+    return datetime.now() - created_time < _cache_ttl
 
 @router.post(
     "/generate/daily",
@@ -276,9 +296,13 @@ def weekly_skill_frequency(
         for week_data in result:
             week = week_data["week"]
             for skill_data in week_data["skills"]:
+                # 주차를 날짜로 변환 (해당 주의 첫 번째 날)
+                from datetime import datetime, timedelta
+                week_start = datetime.strptime(f"{year}-W{week:02d}-1", "%Y-W%W-%w").date()
+                
                 response.append(WeeklySkillStat(
-                    year=year,
                     week=week,
+                    date=week_start,
                     skill=skill_data["skill_name"],
                     count=skill_data["frequency"]
                 ))
@@ -340,8 +364,8 @@ def weekly_skill_frequency_current(
             week = week_data["week"]
             for skill_data in week_data["skills"]:
                 response.append(WeeklySkillStat(
-                    year=year,
                     week=week,
+                    date=current_date.date(),
                     skill=skill_data["skill_name"],
                     count=skill_data["frequency"]
                 ))
@@ -579,11 +603,13 @@ async def resume_vs_job_skill_trend(
 사용자의 이력 정보와 선택한 직무(카테고리)를 바탕으로 GPT(OpenRouter) 기반 갭차이 분석을 수행합니다.\n
 - 분석 결과는 자연어 설명(gap_result)과 부족 역량 Top 5 리스트(top_skills)로 구성됩니다.\n
 - 프론트엔드는 gap_result를 출력용으로, top_skills를 투두리스트 등 내부 활용에 사용할 수 있습니다.\n
-- LLM 호출 실패 시 에러 메시지가 반환될 수 있습니다.
+- LLM 호출 실패 시 에러 메시지가 반환될 수 있습니다.\n
+- 캐싱: 1시간 동안 같은 사용자와 카테고리에 대한 중복 분석을 방지합니다.
 """
 )
 def gap_analysis_endpoint(
     category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 분석 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -599,6 +625,19 @@ def gap_analysis_endpoint(
             user_id = int(user_id)
         if not isinstance(user_id, int):
             raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = get_cache_key(user_id, category, "gap_analysis")
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_result = _gap_analysis_cache.get(cache_key)
+            if is_cache_valid(cached_result):
+                logger.info(f"캐시된 갭 분석 결과 반환: 사용자 {user_id}, 카테고리 {category}")
+                return cached_result['data']
+        
+        # 캐시가 없거나 만료된 경우 새로 분석 수행
+        logger.info(f"새로운 갭 분석 수행: 사용자 {user_id}, 카테고리 {category}")
         result = perform_gap_analysis_visualization(user_id, category, db=db)
 
         # 1. 프론트에 보여줄 자연어 결과 (마크다운 형식 제거)
@@ -612,10 +651,19 @@ def gap_analysis_endpoint(
         # 예시: 추후 비동기로 보내거나 DB에 저장
         # send_to_todo(user_id, top_skills)
 
-        return {
+        response_data = {
             "gap_result": gap_result,      # 프론트에 출력할 자연어 (마크다운 제거됨)
             "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능
         }
+        
+        # 캐시에 저장
+        _gap_analysis_cache[cache_key] = {
+            'data': response_data,
+            'created_time': datetime.now()
+        }
+        
+        logger.info(f"갭 분석 완료 및 캐시 저장: 사용자 {user_id}, 카테고리 {category}")
+        return response_data
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -623,6 +671,86 @@ def gap_analysis_endpoint(
         import traceback
         error_detail = f"갭 분석 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
         raise HTTPException(status_code=500, detail=error_detail)
+
+@router.delete("/cache/clear", summary="캐시 초기화", description="갭 분석 및 로드맵 추천 캐시를 모두 초기화합니다.")
+def clear_cache(
+    current_user: User = Depends(get_current_user)
+):
+    """캐시를 초기화합니다."""
+    try:
+        global _gap_analysis_cache, _roadmap_cache
+        
+        # 사용자별 캐시만 삭제
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 사용자 관련 캐시 키 찾기
+        keys_to_remove = []
+        for cache_key in _gap_analysis_cache.keys():
+            if f":{user_id}:" in cache_key:
+                keys_to_remove.append(cache_key)
+        
+        for cache_key in _roadmap_cache.keys():
+            if f":{user_id}:" in cache_key:
+                keys_to_remove.append(cache_key)
+        
+        # 캐시 삭제
+        for key in keys_to_remove:
+            if key in _gap_analysis_cache:
+                del _gap_analysis_cache[key]
+            if key in _roadmap_cache:
+                del _roadmap_cache[key]
+        
+        logger.info(f"사용자 {user_id}의 캐시 {len(keys_to_remove)}개 삭제 완료")
+        
+        return {
+            "message": f"캐시 {len(keys_to_remove)}개가 삭제되었습니다.",
+            "deleted_count": len(keys_to_remove)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"캐시 초기화 실패: {str(e)}")
+
+@router.get("/cache/status", summary="캐시 상태 조회", description="현재 캐시 상태를 조회합니다.")
+def get_cache_status(
+    current_user: User = Depends(get_current_user)
+):
+    """캐시 상태를 조회합니다."""
+    try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 사용자 관련 캐시만 조회
+        user_gap_cache = {}
+        user_roadmap_cache = {}
+        
+        for cache_key, cache_data in _gap_analysis_cache.items():
+            if f":{user_id}:" in cache_key:
+                user_gap_cache[cache_key] = {
+                    "created_time": cache_data['created_time'].isoformat(),
+                    "is_valid": is_cache_valid(cache_data)
+                }
+        
+        for cache_key, cache_data in _roadmap_cache.items():
+            if f":{user_id}:" in cache_key:
+                user_roadmap_cache[cache_key] = {
+                    "created_time": cache_data['created_time'].isoformat(),
+                    "is_valid": is_cache_valid(cache_data)
+                }
+        
+        return {
+            "gap_analysis_cache": user_gap_cache,
+            "roadmap_cache": user_roadmap_cache,
+            "total_gap_cache": len(_gap_analysis_cache),
+            "total_roadmap_cache": len(_roadmap_cache),
+            "user_gap_cache_count": len(user_gap_cache),
+            "user_roadmap_cache_count": len(user_roadmap_cache)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"캐시 상태 조회 실패: {str(e)}")
 
 @router.get(
     "/skill_search",
@@ -686,6 +814,7 @@ async def get_roadmap_recommendations_endpoint(
     category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
     limit: int = Query(10, description="각 타입별 추천받을 로드맵 개수 (최대 20개씩, 총 40개)"),
     type: Optional[str] = Query(None, description="필터링할 타입 (예: 부트캠프, 강의)"),
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -703,6 +832,24 @@ async def get_roadmap_recommendations_endpoint(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
+        # 캐시 키 생성
+        cache_key = get_cache_key(user_id, category, "roadmap")
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_result = _roadmap_cache.get(cache_key)
+            if is_cache_valid(cached_result):
+                logger.info(f"캐시된 로드맵 추천 결과 반환: 사용자 {user_id}, 카테고리 {category}")
+                cached_data = cached_result['data']
+                # type별 필터링 적용
+                if type:
+                    filtered_roadmaps = [roadmap for roadmap in cached_data if roadmap.get('type') == type]
+                    return filtered_roadmaps
+                return cached_data
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 로드맵 추천 수행: 사용자 {user_id}, 카테고리 {category}")
+        
         # 1. 갭 분석 수행
         gap_analysis_result = perform_gap_analysis_visualization(user_id, category, db)
         
@@ -714,6 +861,14 @@ async def get_roadmap_recommendations_endpoint(
             db=db,
             limit=limit
         )
+        
+        # 캐시에 저장
+        _roadmap_cache[cache_key] = {
+            'data': recommended_roadmaps,
+            'created_time': datetime.now()
+        }
+        
+        logger.info(f"로드맵 추천 완료 및 캐시 저장: 사용자 {user_id}, 카테고리 {category}")
         
         # 3. type별 필터링
         if type:

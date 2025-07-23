@@ -100,7 +100,13 @@ async def run_daily_batch_jobs():
 
 def start_scheduler():
     """스케줄러 시작"""
-    if not APSCHEDULER_AVAILABLE:
+    # 테스트 환경에서는 스케줄러 자동 실행 비활성화
+    import os
+    if os.getenv("DISABLE_SCHEDULER", "false").lower() == "true":
+        similarity_logger.info("스케줄러가 비활성화되어 있습니다. (DISABLE_SCHEDULER=true)")
+        return
+        
+    if not APSCHEDULER_AVAILABLE or scheduler is None:
         similarity_logger.warning("APScheduler가 설치되지 않았습니다. 스케줄러 기능이 비활성화됩니다.")
         return
         
@@ -124,7 +130,7 @@ def start_scheduler():
 
 def stop_scheduler():
     """스케줄러 중지"""
-    if not APSCHEDULER_AVAILABLE:
+    if not APSCHEDULER_AVAILABLE or scheduler is None:
         return
         
     try:
@@ -135,7 +141,7 @@ def stop_scheduler():
 
 def get_scheduler_status():
     """스케줄러 상태 조회"""
-    if not APSCHEDULER_AVAILABLE:
+    if not APSCHEDULER_AVAILABLE or scheduler is None:
         return {
             "running": False,
             "available": False,

@@ -19,22 +19,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        print("JWT payload:", payload)  # 토큰 디코딩 결과 확인
         user_id_str = payload.get("sub")
         if user_id_str is None:
-            print(" 'sub' not in payload")
             raise credentials_exception
         user_id: int = int(user_id_str)
     except JWTError as e:
-        print(" JWT decode error:", e)
         raise credentials_exception
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
-        print("유저 ID로 조회 실패:", user_id)
         raise credentials_exception
-
-    print("인증된 유저:", user.id, user.email)
     return user
 
 def get_optional_current_user(token: Optional[str] = Depends(oauth2_scheme_optional), db: Session = Depends(get_db)) -> Optional[User]:

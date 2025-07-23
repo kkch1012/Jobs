@@ -6,9 +6,14 @@ from app.models.job_post import JobPost
 from app.services.recommender import recommend_jobs_for_user, get_top_n_jobs_with_scores, make_prompt, call_qwen_api
 from app.services.jobs_gap import recommend_job_for_user, get_job_recommendation_simple
 from app.utils.dependencies import get_current_user
+from app.utils.cache import cache_manager
 import os
 import re
 import json
+import logging
+from datetime import timedelta
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/recommend", tags=["Recommend"])
 
@@ -22,9 +27,11 @@ router = APIRouter(prefix="/recommend", tags=["Recommend"])
 - **LLM 재추천**: 유사도 상위 20개의 공고를 LLM(Qwen)에게 보내, 최종적으로 가장 적합한 5개의 공고와 그 이유를 추천받습니다.
 - **API 키 필요**: 이 기능을 사용하려면 서버 환경변수에 `OPENROUTER_API_KEY`가 설정되어 있어야 합니다.
 - **권한**: 로그인된 사용자만 사용 가능
+- **캐싱**: 1시간 동안 같은 사용자에 대한 중복 추천을 방지합니다.
 """
 )
 def recommend_for_current_user(
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -36,8 +43,32 @@ def recommend_for_current_user(
         )
     
     try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = cache_manager.generate_cache_key("job_recommendation", user_id=user_id)
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_data = cache_manager.get_cached_data("job_recommendation", cache_key, timedelta(hours=1))
+            if cached_data is not None:
+                logger.info(f"캐시된 채용공고 추천 결과 반환: 사용자 {user_id}")
+                return cached_data
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 채용공고 추천 수행: 사용자 {user_id}")
         result = recommend_jobs_for_user(current_user, db, api_key, 20)
-        return {"recommendation": result}
+        
+        response_data = {"recommendation": result}
+        
+        # 캐시에 저장
+        cache_manager.set_cached_data("job_recommendation", cache_key, response_data, timedelta(hours=1))
+        
+        logger.info(f"채용공고 추천 완료 및 캐시 저장: 사용자 {user_id}")
+        return response_data
+        
     except Exception as e:
         raise HTTPException(
             status_code=500, 
@@ -53,9 +84,11 @@ def recommend_for_current_user(
 - **유사도 기반**: 사용자와 유사도가 높은 상위 20개 공고에서 선별
 - **LLM 선별**: LLM이 20개 중에서 가장 적합한 5개를 선별
 - **응답**: 채용공고 상세 정보와 함께 반환 (user_preference와 유사한 형태)
+- **캐싱**: 1시간 동안 같은 사용자에 대한 중복 추천을 방지합니다.
 """
 )
 def get_recommended_job_ids(
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -67,12 +100,33 @@ def get_recommended_job_ids(
         )
     
     try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = cache_manager.generate_cache_key("job_ids", user_id=user_id)
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_data = cache_manager.get_cached_data("job_ids", cache_key, timedelta(hours=1))
+            if cached_data is not None:
+                logger.info(f"캐시된 채용공고 ID 추천 결과 반환: 사용자 {user_id}")
+                return cached_data
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 채용공고 ID 추천 수행: 사용자 {user_id}")
+        
         from app.schemas.job_post import JobPostSimpleResponse
 
         top_jobs_with_sim = get_top_n_jobs_with_scores(current_user, db, n=20)
 
         if not top_jobs_with_sim:
-            return {"recommended_jobs": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
+            response_data = {"recommended_jobs": [], "message": "회원님과 유사한 채용공고를 찾지 못했습니다."}
+            
+            # 캐시에 저장
+            cache_manager.set_cached_data("job_ids", cache_key, response_data, timedelta(hours=1))
+            return response_data
 
         # JobPost 객체만 추출
         top_jobs = [job for job, _ in top_jobs_with_sim]
@@ -142,11 +196,17 @@ def get_recommended_job_ids(
         # 유사도 점수를 기준으로 내림차순 정렬 (높은 적합도 순)
         job_responses.sort(key=lambda x: x.similarity or 0, reverse=True)
         
-        return {
+        response_data = {
             "recommended_jobs": job_responses,
             "total_candidates": len(top_jobs),
             "recommended_count": len(job_responses)
         }
+        
+        # 캐시에 저장
+        cache_manager.set_cached_data("job_ids", cache_key, response_data, timedelta(hours=1))
+        
+        logger.info(f"채용공고 ID 추천 완료 및 캐시 저장: 사용자 {user_id}")
+        return response_data
             
     except Exception as e:
         raise HTTPException(
@@ -260,10 +320,12 @@ def generate_job_explanations(
 - **페이지별 조회**: 한 페이지당 지정된 개수의 채용공고를 유사도 높은 순으로 반환
 - **페이징**: 프론트엔드에서 페이지 번호와 페이지당 개수를 지정하여 조회 가능
 - **응답**: 채용공고 상세 정보와 유사도 점수, 전체 페이지 수 포함
+- **캐싱**: 1시간 동안 같은 사용자와 페이지에 대한 중복 조회를 방지합니다.
 
 **요청 파라미터:**
 - `page`: 페이지 번호 (기본값: 1)
 - `jobs_per_page`: 페이지당 공고 수 (기본값: 5, 최대: 50)
+- `force_refresh`: 캐시를 무시하고 새로 조회 (기본값: false)
 
 **응답 예시:**
 ```json
@@ -290,10 +352,28 @@ def generate_job_explanations(
 def get_paginated_recommended_jobs(
     page: int = Query(1, ge=1, description="페이지 번호 (1부터 시작)"),
     jobs_per_page: int = Query(5, ge=1, le=50, description="페이지당 공고 수 (최대 50)"),
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 조회"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = get_cache_key(user_id, "job_paginated", page=page, jobs_per_page=jobs_per_page)
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_result = _job_paginated_cache.get(cache_key)
+            if is_cache_valid(cached_result):
+                logger.info(f"캐시된 페이지별 채용공고 추천 결과 반환: 사용자 {user_id}, 페이지 {page}")
+                return cached_result['data']
+        
+        # 캐시가 없거나 만료된 경우 새로 조회 수행
+        logger.info(f"새로운 페이지별 채용공고 추천 수행: 사용자 {user_id}, 페이지 {page}")
+        
         from app.models.job_post import JobPost
         from app.models.user_similarity import UserSimilarity
         from app.schemas.job_post import JobPostSimpleResponse
@@ -312,7 +392,7 @@ def get_paginated_recommended_jobs(
         total_jobs = query.count()
         
         if total_jobs == 0:
-            return {
+            response_data = {
                 "jobs": [],
                 "pagination": {
                     "current_page": page,
@@ -322,6 +402,13 @@ def get_paginated_recommended_jobs(
                 },
                 "message": "회원님과 유사한 채용공고를 찾지 못했습니다."
             }
+            
+            # 캐시에 저장
+            _job_paginated_cache[cache_key] = {
+                'data': response_data,
+                'created_time': datetime.now()
+            }
+            return response_data
         
         # 페이지네이션 계산
         total_pages = (total_jobs + jobs_per_page - 1) // jobs_per_page  # 올림 나눗셈
@@ -341,7 +428,7 @@ def get_paginated_recommended_jobs(
             job_response.similarity = similarity
             job_responses.append(job_response)
         
-        return {
+        response_data = {
             "jobs": job_responses,
             "pagination": {
                 "current_page": page,
@@ -350,6 +437,15 @@ def get_paginated_recommended_jobs(
                 "jobs_per_page": jobs_per_page
             }
         }
+        
+        # 캐시에 저장
+        _job_paginated_cache[cache_key] = {
+            'data': response_data,
+            'created_time': datetime.now()
+        }
+        
+        logger.info(f"페이지별 채용공고 추천 완료 및 캐시 저장: 사용자 {user_id}, 페이지 {page}")
+        return response_data
             
     except Exception as e:
         raise HTTPException(
@@ -368,28 +464,55 @@ def get_paginated_recommended_jobs(
 - **시장 트렌드 반영**: weekly_skill_stats 테이블의 데이터를 기반으로 시장 트렌드 반영
 - **점수 계산**: 기술 매칭도와 숙련도 가중치를 고려한 점수 계산
 - **응답**: 추천 직무명, 점수, 상세 분석 결과
+- **캐싱**: 1시간 동안 같은 사용자에 대한 중복 추천을 방지합니다.
 """
 )
 def recommend_job_for_current_user(
     verbose: bool = Query(False, description="상세 분석 결과 포함 여부"),
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = get_cache_key(user_id, "job_recommendation", verbose=verbose)
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_result = _job_recommendation_cache.get(cache_key)
+            if is_cache_valid(cached_result):
+                logger.info(f"캐시된 직무 추천 결과 반환: 사용자 {user_id}")
+                return cached_result['data']
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 직무 추천 수행: 사용자 {user_id}")
         result = recommend_job_for_user(current_user, db, verbose=verbose)
         
         if result["recommended_job"] is None:
-            return {
+            response_data = {
                 "success": False,
                 "message": result.get("message", "직무 추천에 실패했습니다."),
                 "data": None
             }
+        else:
+            response_data = {
+                "success": True,
+                "message": "직무 추천이 완료되었습니다.",
+                "data": result
+            }
         
-        return {
-            "success": True,
-            "message": "직무 추천이 완료되었습니다.",
-            "data": result
+        # 캐시에 저장
+        _job_recommendation_cache[cache_key] = {
+            'data': response_data,
+            'created_time': datetime.now()
         }
+        
+        logger.info(f"직무 추천 완료 및 캐시 저장: 사용자 {user_id}")
+        return response_data
         
     except Exception as e:
         raise HTTPException(
@@ -406,22 +529,87 @@ def recommend_job_for_current_user(
 
 - **응답**: 추천 직무명 문자열만 반환
 - **용도**: 간단한 직무 추천이 필요한 경우 사용
+- **캐싱**: 1시간 동안 같은 사용자에 대한 중복 추천을 방지합니다.
 """
 )
 def get_simple_job_recommendation(
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = get_cache_key(user_id, "job_simple")
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_result = _job_recommendation_cache.get(cache_key)
+            if is_cache_valid(cached_result):
+                logger.info(f"캐시된 간단한 직무 추천 결과 반환: 사용자 {user_id}")
+                return cached_result['data']
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 간단한 직무 추천 수행: 사용자 {user_id}")
         recommended_job = get_job_recommendation_simple(current_user, db)
         
-        return {
+        response_data = {
             "recommended_job": recommended_job,
             "user_id": current_user.id
         }
+        
+        # 캐시에 저장
+        _job_recommendation_cache[cache_key] = {
+            'data': response_data,
+            'created_time': datetime.now()
+        }
+        
+        logger.info(f"간단한 직무 추천 완료 및 캐시 저장: 사용자 {user_id}")
+        return response_data
         
     except Exception as e:
         raise HTTPException(
             status_code=500,
             detail=f"직무 추천 중 오류가 발생했습니다: {str(e)}"
         )
+
+@router.delete("/cache/clear", summary="추천 캐시 초기화", description="모든 추천 관련 캐시를 초기화합니다.")
+def clear_recommendation_cache(
+    current_user: User = Depends(get_current_user)
+):
+    """추천 캐시를 초기화합니다."""
+    try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 추천 관련 캐시들
+        cache_names = ["job_recommendation", "job_ids", "job_explanation", "job_paginated"]
+        deleted_count = cache_manager.clear_user_cache(user_id, cache_names)
+        
+        return {
+            "message": "추천 캐시가 초기화되었습니다.",
+            "deleted_cache_count": deleted_count,
+            "user_id": user_id
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"캐시 초기화 실패: {str(e)}")
+
+@router.get("/cache/status", summary="추천 캐시 상태 조회", description="현재 추천 캐시 상태를 조회합니다.")
+def get_recommendation_cache_status(
+    current_user: User = Depends(get_current_user)
+):
+    """추천 캐시 상태를 조회합니다."""
+    try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        return cache_manager.get_cache_status(user_id)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"캐시 상태 조회 실패: {str(e)}")

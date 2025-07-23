@@ -7,8 +7,9 @@ from app.config import settings
 class MCPClient:
     """외부 MCP 서버와 통신하는 클라이언트"""
     
-    def __init__(self, mcp_server_url: str = "http://localhost:8001"):
-        self.mcp_server_url = mcp_server_url
+    def __init__(self, mcp_server_url: str = None):
+        from app.config import settings
+        self.mcp_server_url = mcp_server_url or settings.MCP_SERVER_URL
         self.client = httpx.AsyncClient()
     
     async def list_tools(self) -> List[Dict[str, Any]]:

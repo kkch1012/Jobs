@@ -89,7 +89,7 @@ def call_qwen_api(prompt: str, api_key: str) -> str | None:
     }
     
     # 더 안정적인 모델 사용
-    model = "qwen/qwen3-30b-a3b"
+    model = "meta-llama/llama-4-maverick"
     
     body = {
         "model": model,

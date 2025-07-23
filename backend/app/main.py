@@ -39,12 +39,12 @@ async def lifespan(app: FastAPI):
     await init_mongo()
     # 데이터베이스 이벤트 리스너 설정
     setup_database_events()
-    # 스케줄러 시작
-    start_scheduler()
+    # 스케줄러 시작 (테스트 시 비활성화 가능)
+    # start_scheduler()
     # 애플리케이션 실행
     yield
-    # 앱 종료 시 스케줄러 중지
-    stop_scheduler()
+    # 앱 종료 시 스케줄러 중지 (테스트 시 비활성화 가능)
+    # stop_scheduler()
     # 앱 종료 시 MongoDB 연결 정리
     await close_mongo()
 

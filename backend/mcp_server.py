@@ -9,9 +9,11 @@ import asyncio
 from app.utils.text_utils import clean_markdown_text
 
 # MCP 서버 설정
+from app.config import settings
+
 MCP_SERVER_HOST = "localhost"
 MCP_SERVER_PORT = 8001
-FASTAPI_SERVER_URL = "http://localhost:8000"  # 기존 FastAPI 서버 URL
+FASTAPI_SERVER_URL = settings.FASTAPI_SERVER_URL  # 환경변수에서 가져오기
 
 app = FastAPI(
     title="MCP Server",
@@ -596,7 +598,27 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             ])
         else:
             # GET 요청으로 처리
-            result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)
+            # job_recommendation은 인증이 필요하고 쿼리 파라미터가 없음
+            if tool_name == "job_recommendation":
+                if not request.authorization:
+                    return ToolCallResponse(content=[
+                        {
+                            "type": "text",
+                            "text": json.dumps({
+                                "error": "인증이 필요합니다",
+                                "message": "job_recommendation 도구를 사용하려면 authorization 헤더에 Bearer 토큰을 포함해야 합니다.",
+                                "example": {
+                                    "name": "job_recommendation",
+                                    "arguments": {},
+                                    "authorization": "Bearer your_jwt_token_here"
+                                }
+                            }, ensure_ascii=False)
+                        }
+                    ])
+                result = await fastapi_client.call_api(endpoint, None, headers=headers)
+            else:
+                result = await fastapi_client.call_api(endpoint, request.arguments, headers=headers)
+            
             return ToolCallResponse(content=[
                 {
                     "type": "text",
@@ -650,8 +672,17 @@ async def chat_with_mcp(request: MCPRequest):
                     id=request.id
                 )
             
-            # FastAPI 서버 호출
-            api_result = await fastapi_client.call_api(endpoint, arguments)
+            # FastAPI 서버 호출 (인증이 필요한 엔드포인트는 헤더 전달)
+            headers = {}
+            if tool_name in ["job_recommendation", "get_my_resume", "gap_analysis", "roadmap_recommendations", "roadmap_recommendations_direct", "resume_vs_job_skill_trend"]:
+                # 인증이 필요한 엔드포인트는 authorization 헤더 필요
+                # MCP 채팅에서는 인증 토큰을 별도로 받아야 함
+                return MCPResponse(
+                    error={"message": f"'{tool_name}' 도구는 인증이 필요합니다. /tools/{tool_name}/call 엔드포인트를 사용해주세요."},
+                    id=request.id
+                )
+            
+            api_result = await fastapi_client.call_api(endpoint, arguments, headers=headers)
             
             # 도구별 응답 처리
             if tool_name == "gap_analysis":
@@ -732,7 +763,7 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "app.services.mcp_server:app",
+        "mcp_server:app",
         host=MCP_SERVER_HOST,
         port=MCP_SERVER_PORT,
         reload=True

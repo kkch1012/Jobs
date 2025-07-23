@@ -29,7 +29,7 @@ class OpenRouterClient:
         extra_body: dict = {},
     ) -> Optional[str]:
         headers = {
-            "HTTP-Referer": "http://localhost:8000",
+            "HTTP-Referer": settings.FASTAPI_SERVER_URL,
             "X-Title": "JOBS MCP Chat"
         }
         headers.update(extra_headers)

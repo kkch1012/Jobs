@@ -8,6 +8,10 @@ import sys
 import os
 from datetime import datetime
 import logging
+from dotenv import load_dotenv
+
+# 환경변수 로드
+load_dotenv()
 
 # 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

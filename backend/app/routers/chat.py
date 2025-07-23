@@ -187,7 +187,7 @@ async def chat_with_llm(
 
         # 2. 도구 호출이 필요한 intent 처리
         mcp_result = None
-        if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization", "job_recommendation"]:
+        if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization"]:
             # LLM이 추출한 파라미터를 기본값과 병합
             parameters = merge_parameters_with_defaults(parameters, intent)
             
@@ -198,8 +198,8 @@ async def chat_with_llm(
                 await save_message_to_mongo(data.session_id, "assistant", error_content)
                 return create_error_response(data.session_id, error_content)
 
-        # 3. 이력서 관련 intent 처리 (인증 필요)
-        elif intent in ["get_my_resume", "update_resume"]:
+        # 3. 인증이 필요한 intent 처리
+        elif intent in ["get_my_resume", "update_resume", "job_recommendation"]:
             if not current_user:
                 error_content = "로그인이 필요합니다."
                 await save_message_to_mongo(data.session_id, "assistant", error_content)
@@ -213,10 +213,14 @@ async def chat_with_llm(
                 return create_error_response(data.session_id, error_content, 401)
             
             try:
+                # job_recommendation의 경우 파라미터 병합
+                if intent == "job_recommendation":
+                    parameters = merge_parameters_with_defaults(parameters, intent)
+                
                 # auth_header는 위에서 None 체크를 했으므로 str 타입임이 보장됨
                 mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
             except Exception as e:
-                error_content = f"이력서 도구 호출 실패: {str(e)}"
+                error_content = f"인증 도구 호출 실패: {str(e)}"
                 await save_message_to_mongo(data.session_id, "assistant", error_content)
                 return create_error_response(data.session_id, error_content)
 
