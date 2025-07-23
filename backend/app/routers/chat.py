@@ -7,17 +7,16 @@ from app.models.mongo import MCPMessage
 from app.schemas.mcp import MessageIn
 from app.services.mcp_client import mcp_client
 from app.services.llm_client import llm_client
-from app.utils.dependencies import get_current_user
+from app.utils.dependencies import get_current_user, get_optional_current_user
 from app.models.user import User
 from app.models.chat_session import ChatSession
 from typing import Optional, Dict, Any, List
 import re
-from app.models.job_post import JobPost
 from fastapi.responses import JSONResponse
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/mcp_chat", tags=["mcp_chat"])
+router = APIRouter(prefix="/chat", tags=["chat"])
 
 # intent별 파라미터 추출 정보 (기본값만 정의)
 API_INTENT_PARAMETERS = {
@@ -162,17 +161,18 @@ def create_error_response(session_id: int, error_content: str, status_code: int 
         response_content["action"] = action
     return JSONResponse(status_code=status_code, content=response_content)
 
-@router.post("/llm/chat/", summary="LLM+MCP 기반 AI 챗봇 대화 (의도 분석+도구 호출+자연어 요약)",
+@router.post("/", summary="LLM+MCP 기반 AI 챗봇 대화 (의도 분석+도구 호출+자연어 요약)",
              description="""
 OpenRouter API를 사용해 LLM으로 intent를 분석하고,
 MCP 서버의 도구를 호출한 결과를 LLM이 자연어로 요약/설명/추천합니다.
 - intent에 따라 실제 DB/API 결과를 LLM 프롬프트에 포함하거나, 이력서 수정/추가/삭제/조회, 페이지 이동 등도 처리합니다.
 - 프론트엔드에 action, page, updated_resume 등 필요한 정보를 명확히 반환합니다.
+- 인증이 필요한 기능의 경우 자동으로 인증을 요구합니다.
 """)
 async def chat_with_llm(
     data: MessageIn,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
     model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
 ):
@@ -198,7 +198,7 @@ async def chat_with_llm(
                 await save_message_to_mongo(data.session_id, "assistant", error_content)
                 return create_error_response(data.session_id, error_content)
 
-        # 3. 이력서 관련 intent 처리
+        # 3. 이력서 관련 intent 처리 (인증 필요)
         elif intent in ["get_my_resume", "update_resume"]:
             if not current_user:
                 error_content = "로그인이 필요합니다."
@@ -236,64 +236,6 @@ async def chat_with_llm(
         response = {
             "answer": answer,
             "intent": intent,
-            "parameters": parameters
-        }
-        
-        if mcp_result is not None:
-            response["mcp_result"] = mcp_result
-            
-        return response
-
-    except Exception as e:
-        error_content = f"채팅 처리 중 오류가 발생했습니다: {str(e)}"
-        await save_message_to_mongo(data.session_id, "assistant", error_content)
-        return create_error_response(data.session_id, error_content)
-
-@router.post("/llm/chat/test", summary="LLM+MCP 기반 AI 챗봇 테스트 (인증 없음)", 
-             description="테스트용 LLM+MCP 통합 채팅 엔드포인트입니다. 인증이 필요 없습니다.")
-async def chat_with_llm_test(
-    data: MessageIn,
-    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
-):
-    """테스트용 LLM+MCP 통합 채팅 엔드포인트입니다."""
-    try:
-        # 0. 사용자 메시지 저장
-        await save_message_to_mongo(data.session_id, "user", data.message)
-
-        # 1. LLM으로 intent 분석
-        intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
-        intent = intent_json.get("intent", "general")
-        parameters = intent_json.get("parameters", {})
-
-        # 2. 도구 호출이 필요한 intent 처리 (인증이 필요 없는 도구들만)
-        mcp_result = None
-        if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization"]:
-            # LLM이 추출한 파라미터를 기본값과 병합
-            parameters = merge_parameters_with_defaults(parameters, intent)
-            
-            try:
-                mcp_result = await mcp_client.call_tool(intent, parameters)
-            except Exception as e:
-                error_content = f"MCP 도구 호출 실패: {str(e)}"
-                await save_message_to_mongo(data.session_id, "assistant", error_content)
-                return create_error_response(data.session_id, error_content)
-
-        # 3. 응답 생성
-        if mcp_result is not None:
-            # MCP 결과가 있는 경우 LLM 요약
-            answer = await generate_llm_summary(intent, mcp_result, model)
-        else:
-            # 일반 대화
-            answer = await llm_client.generate_response(data.message)
-            answer = (answer or "응답 생성 실패").strip()
-
-        # 4. 어시스턴트 메시지 저장
-        await save_message_to_mongo(data.session_id, "assistant", answer)
-
-        # 5. 응답 반환
-        response = {
-            "message": answer,  # 테스트용이므로 'message'로 통일
-            "intent": intent_json,
             "parameters": parameters
         }
         

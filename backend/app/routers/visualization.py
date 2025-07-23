@@ -1,25 +1,146 @@
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
 from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
-from collections import Counter, defaultdict
 from app.database import get_db
-from app.models.job_post import JobPost
 from app.models.job_required_skill import JobRequiredSkill
 from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
 from app.utils.dependencies import get_current_user
-from app.models.user_skill import UserSkill
 from app.models.user import User
-from app.models.certificate import Certificate
 from app.services.gap_model import perform_gap_analysis_visualization
 from app.services.weekly_stats_service import WeeklyStatsService
 from app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel
 from app.services.roadmap_model import get_roadmap_recommendations
+from app.services.statistics_service import StatisticsService
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
+
+@router.post(
+    "/generate/daily",
+    summary="일간 스킬 통계 생성",
+    description="""
+모든 직무에 대해 일간 스킬 통계를 생성합니다.
+
+- tech_stack, required_skills, preferred_skills, main_tasks_skills 4개 필드에 대해 통계 생성
+- 실행 시점 날짜 기준으로 통계를 생성합니다.
+- 같은 날짜에 실행하면 기존 통계를 덮어쓰고, 다른 날짜면 새로운 통계를 생성합니다.
+- date 컬럼에 실행 시점 날짜가 저장됩니다 (예: "2025-01-15")
+- week 컬럼에는 해당 날짜의 ISO 주차가 자동으로 계산되어 저장됩니다.
+- 백그라운드에서 실행되어 대용량 데이터도 처리 가능합니다.
+"""
+)
+async def generate_daily_stats(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    try:
+        logger.info("일간 스킬 통계 생성 요청: 모든 필드 타입")
+        
+        # 백그라운드에서 모든 필드 타입에 대해 통계 생성 실행
+        background_tasks.add_task(
+            WeeklyStatsService._generate_all_field_types_stats,
+            db
+        )
+        
+        return {
+            "message": "일간 스킬 통계 생성이 시작되었습니다.",
+            "field_types": ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"],
+            "status": "processing",
+            "note": "오늘 날짜의 기존 통계는 자동으로 삭제되고 새로운 통계로 덮어쓰기됩니다. date 컬럼에 실행 시점 날짜가 저장됩니다."
+        }
+        
+    except Exception as e:
+        logger.error(f"일간 스킬 통계 생성 요청 실패: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"일간 통계 생성 요청 중 오류가 발생했습니다: {str(e)}"
+        )
+
+@router.get(
+    "/daily/{job_name}",
+    summary="일간 스킬 통계 조회",
+    description="""
+특정 직무의 일간 스킬 통계를 조회합니다.
+
+- tech_stack, required_skills, preferred_skills, main_tasks_skills 4개 필드 통계를 모두 조회
+- 미리 계산된 통계 데이터를 빠르게 조회합니다.
+- date 파라미터로 특정 날짜를 조회할 수 있습니다 (YYYY-MM-DD 형식).
+- 기본값은 오늘 날짜입니다.
+- 실행 시점 날짜 기준으로 생성된 통계를 조회합니다.
+"""
+)
+async def get_daily_stats(
+    job_name: str,
+    date: str | None = None,  # 특정 날짜 입력 (YYYY-MM-DD 형식, 기본값: 오늘 날짜)
+    db: Session = Depends(get_db)
+):
+    # 현재 날짜 계산 (서울 시간대)
+    seoul_tz = pytz.timezone('Asia/Seoul')
+    current_date = datetime.now(seoul_tz).date()
+    
+    # date가 None이면 현재 날짜로 설정
+    if date is None:
+        target_date = current_date
+    else:
+        try:
+            target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="날짜 형식이 올바르지 않습니다. YYYY-MM-DD 형식으로 입력해주세요.")
+        
+    try:
+        # 1. 직무 조회
+        job_role = db.query(JobRequiredSkill).filter(
+            JobRequiredSkill.job_name == job_name
+        ).first()
+        
+        if not job_role:
+            raise HTTPException(status_code=404, detail=f"직무 '{job_name}'을 찾을 수 없습니다.")
+        
+        field_types = ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"]
+        all_stats = {}
+        
+        for field_type in field_types:
+            # 특정 날짜의 데이터만 조회 (효율적인 쿼리)
+            stats = db.query(WeeklySkillStatModel).filter(
+                WeeklySkillStatModel.job_role_id == job_role.id,
+                WeeklySkillStatModel.field_type == field_type,
+                WeeklySkillStatModel.date == target_date
+            ).order_by(
+                WeeklySkillStatModel.count.desc(),
+                WeeklySkillStatModel.skill.asc()
+            ).all()
+            
+            # 응답 형식으로 변환
+            formatted_stats = []
+            for stat in stats:
+                formatted_stats.append({
+                    "week": stat.week,
+                    "date": stat.date.isoformat(),
+                    "skill": stat.skill,
+                    "count": stat.count
+                })
+            
+            all_stats[field_type] = formatted_stats
+        
+        return {
+            "job_name": job_name,
+            "field_types": field_types,
+            "date": target_date.isoformat(),
+            "stats": all_stats,
+            "total_count": sum(len(stats) for stats in all_stats.values())
+        }
+        
+    except Exception as e:
+        logger.error(f"일간 스킬 통계 조회 실패: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"일간 통계 조회 중 오류가 발생했습니다: {str(e)}"
+        )
 
 @router.get(
     "/weekly_skill_frequency",
@@ -61,80 +182,30 @@ def weekly_skill_frequency(
     year: int = Query(..., description="조회할 연도"),
     db: Session = Depends(get_db)
 ):
-    # 1. 직무명 → id 매핑
-    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
-    if not job_role:
-        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
-    job_role_id = job_role.id
-
-    # 2. 주차 범위 검증
-    if start_week > end_week:
-        raise HTTPException(status_code=400, detail="시작 주차는 마감 주차보다 작거나 같아야 합니다.")
-    
-    # 3. WeeklySkillStat 테이블에서 주차 범위 데이터 조회
-    stats = db.query(
-        WeeklySkillStatModel.week,
-        WeeklySkillStatModel.skill,
-        WeeklySkillStatModel.count,
-        WeeklySkillStatModel.date
-    ).filter(
-        and_(
-            WeeklySkillStatModel.job_role_id == job_role_id,
-            WeeklySkillStatModel.field_type == field,
-            WeeklySkillStatModel.week >= start_week,
-            WeeklySkillStatModel.week <= end_week
+    try:
+        # StatisticsService 사용
+        result = StatisticsService.get_weekly_skill_frequency_range(
+            job_name, start_week, end_week, year, db
         )
-    ).all()
-
-    print(f"DEBUG: 조회 범위 - {year}년 {start_week}주차 ~ {end_week}주차")
-    print(f"DEBUG: 총 {len(stats)}개의 스킬 통계 데이터")
-    
-    # 4. 주차별 기술 키워드 카운트 (합산)
-    week_skill_counter = defaultdict(Counter)
-    
-    for stat in stats:
-        print(f"DEBUG: {stat.week}주차 스킬 '{stat.skill}' 카운트 {stat.count}")
-        week_skill_counter[stat.week].update([stat.skill] * stat.count)
-    
-    print(f"DEBUG: 합산 후 주차별 카운터: {dict(week_skill_counter)}")
-    
-    # 5. 주차별 평균 계산
-    week_avg_counter = defaultdict(Counter)
-    week_day_counts = defaultdict(int)  # 각 주차의 유니크 날짜 수
-    
-    # 각 주차의 유니크 날짜 수 계산
-    for stat in stats:
-        week_day_counts[stat.week] = len(set([s.date for s in stats if s.week == stat.week]))
-    
-    print(f"DEBUG: 주차별 유니크 날짜 수: {dict(week_day_counts)}")
-    
-    # 평균 계산
-    for week, counter in week_skill_counter.items():
-        day_count = week_day_counts[week]
-        if day_count > 0:
-            for skill, total_count in counter.items():
-                avg_count = round(total_count / day_count)  # 반올림해서 int로
-                week_avg_counter[week][skill] = avg_count
-                print(f"DEBUG: {week}주차 '{skill}' 평균: {total_count}/{day_count} = {avg_count}")
-    
-    print(f"DEBUG: 평균 계산 후 주차별 카운터: {dict(week_avg_counter)}")
-
-    # 6. 결과 응답 (주차별 평균)
-    response = []
-    for week, counter in week_avg_counter.items():
-        # 해당 주차의 시작일 계산
-        week_start_date = datetime.strptime(f"{year}-W{week:02d}-1", "%Y-W%W-%w").date()
         
-        for skill, avg_count in counter.items():
-            response.append(WeeklySkillStat(
-                week=week, 
-                date=week_start_date, 
-                skill=skill, 
-                count=avg_count  # 평균값 사용
-            ))
-    # count 기준 내림차순 정렬
-    response = sorted(response, key=lambda x: x.count, reverse=True)
-    return response
+        # 응답 형식 변환
+        response = []
+        for week_data in result:
+            week = week_data["week"]
+            for skill_data in week_data["skills"]:
+                response.append(WeeklySkillStat(
+                    year=year,
+                    week=week,
+                    skill=skill_data["skill_name"],
+                    count=skill_data["frequency"]
+                ))
+        
+        return response
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
 
 @router.get(
     "/weekly_skill_frequency_current",
@@ -172,73 +243,32 @@ def weekly_skill_frequency_current(
     ),
     db: Session = Depends(get_db)
 ):
-    # 1. 직무명 → id 매핑
-    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
-    if not job_role:
-        raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
-    job_role_id = job_role.id
-
-    # 2. 현재 주차 계산
-    seoul_tz = pytz.timezone('Asia/Seoul')
-    current_date = datetime.now(seoul_tz)
-    current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
-    
-    # 3. 해당 직무id로 JobPost 필터링 & 현재 주차만 집계 (만료되지 않은 공고만)
-    posts = db.query(
-        JobPost.posting_date,
-        getattr(JobPost, field)
-    ).filter(
-        and_(
-            JobPost.job_required_skill_id == job_role_id,
-            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
-        )
-    ).all()
-
-    # 4. 현재 주차의 기술 키워드 카운트
-    skill_counter = Counter()
-    for row in posts:
-        posting_date, field_value = row.posting_date, row[1]
+    try:
+        # StatisticsService 사용
+        result = StatisticsService.get_current_weekly_skill_frequency(job_name, field, db)
         
-        # 현재 주차의 공고만 처리
-        post_week = posting_date.isocalendar()[1]
-        if post_week == current_week:
-            skills = []
-            
-            # 필드 타입에 따른 처리
-            if field == "tech_stack":
-                # tech_stack은 문자열 필드
-                if isinstance(field_value, str) and field_value.strip():
-                    skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-            else:
-                # required_skills, preferred_skills, main_tasks_skills는 JSONB 필드
-                if isinstance(field_value, list):
-                    skills = [str(skill).strip() for skill in field_value if skill]
-                elif isinstance(field_value, str) and field_value.strip():
-                    # JSON 문자열인 경우 파싱 시도
-                    try:
-                        import json
-                        parsed = json.loads(field_value)
-                        if isinstance(parsed, list):
-                            skills = [str(skill).strip() for skill in parsed if skill]
-                    except:
-                        # 파싱 실패 시 문자열로 처리
-                        skills = [s.strip() for s in field_value.replace(';', ',').replace('/', ',').split(',') if s.strip()]
-            
-            if skills:
-                skill_counter.update(skills)
-
-    # 5. 결과 응답 (현재 주차만)
-    response = []
-    for skill, count in skill_counter.items():
-        response.append(WeeklySkillStat(
-            week=current_week, 
-            date=current_date.date(), 
-            skill=skill, 
-            count=count
-        ))
-    # count 기준 내림차순 정렬
-    response = sorted(response, key=lambda x: x.count, reverse=True)
-    return response
+        # 응답 형식 변환
+        response = []
+        kst = pytz.timezone('Asia/Seoul')
+        current_date = datetime.now(kst)
+        year = current_date.year
+        
+        for week_data in result:
+            week = week_data["week"]
+            for skill_data in week_data["skills"]:
+                response.append(WeeklySkillStat(
+                    year=year,
+                    week=week,
+                    skill=skill_data["skill_name"],
+                    count=skill_data["frequency"]
+                ))
+        
+        return response
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
 
 @router.get(
     "/resume_vs_job_skill_trend",
@@ -384,65 +414,44 @@ def gap_analysis_endpoint(
     "/skill_search",
     summary="스킬명 검색",
     description="""
-weekly_skill_stats 테이블에서 스킬명을 검색하여 해당 스킬의 통계 정보를 반환합니다.
+스킬명으로 검색하여 직무별 스킬과 사용자 스킬 정보를 반환합니다.
 - 부분 검색을 지원합니다 (예: "aw" 검색 시 "aws" 포함된 스킬들이 검색됨)
-- count, 직무명, field_type 정보를 함께 반환합니다.
+- 직무별 스킬과 사용자 스킬 정보를 함께 반환합니다.
 
 **응답 예시:**
 ```json
-[
-  {
-    "skill": "AWS",
-    "count": 15,
-    "job_name": "백엔드 개발자",
-    "field_type": "tech_stack",
-    "week": 29,
-    "date": "2025-01-15"
-  }
-]
+{
+  "job_skills": [
+    {
+      "skill_name": "AWS",
+      "job_name": "백엔드 개발자",
+      "importance": 5
+    }
+  ],
+  "user_skills": [
+    {
+      "skill_name": "AWS",
+      "user_id": 1,
+      "proficiency_level": 3
+    }
+  ]
+}
 ```
 """,
-    response_model=List[Dict[str, Any]]
+    response_model=Dict[str, List[Dict[str, Any]]]
 )
 def skill_search(
     skill_name: str = Query(..., description="검색할 스킬명 (부분 검색 지원)"),
     db: Session = Depends(get_db)
 ):
     """
-    weekly_skill_stats 테이블에서 스킬명을 검색합니다.
+    스킬명으로 검색하여 직무별 스킬과 사용자 스킬 정보를 반환합니다.
     """
     try:
-        # 스킬명으로 검색 (대소문자 구분 없이 부분 검색, 만료되지 않은 공고 기반 통계만)
-        stats = db.query(
-            WeeklySkillStatModel.skill,
-            WeeklySkillStatModel.count,
-            WeeklySkillStatModel.field_type,
-            WeeklySkillStatModel.week,
-            WeeklySkillStatModel.date,
-            JobRequiredSkill.job_name
-        ).join(
-            JobRequiredSkill,
-            WeeklySkillStatModel.job_role_id == JobRequiredSkill.id
-        ).filter(
-            WeeklySkillStatModel.skill.ilike(f"%{skill_name}%")
-        ).order_by(
-            WeeklySkillStatModel.count.desc(),
-            WeeklySkillStatModel.skill.asc()
-        ).all()
-        
-        # 응답 형식으로 변환
-        result = []
-        for stat in stats:
-            result.append({
-                "skill": stat.skill,
-                "count": stat.count,
-                "job_name": stat.job_name,
-                "field_type": stat.field_type,
-                "week": stat.week,
-                "date": stat.date.isoformat() if stat.date else None
-            })
-        
+        result = StatisticsService.search_skills_by_keyword(skill_name, db)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"스킬 검색 실패: {str(e)}")
         
     except Exception as e:
         import traceback

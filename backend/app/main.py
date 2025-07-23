@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.models import user, user_skill, roadmap, user_roadmap, user_preference
 from app.database import Base, engine
 from app.database.mongo import init_mongo, close_mongo
 from app.utils.database_events import setup_database_events
@@ -25,7 +24,6 @@ from app.routers import (
     todo_list,
     recommender,
     similarity,
-    stats_generator,
     scheduler,
     mcp
 )
@@ -64,8 +62,7 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs",
         "mcp_endpoints": [
-            "/mcp_chat/llm/chat/",
-            "/mcp_chat/llm/chat/test",
+            "/chat/",
             "/mcp/tools",
             "/mcp/health"
         ]
@@ -99,6 +96,5 @@ app.include_router(session.router)
 app.include_router(todo_list.router)
 app.include_router(recommender.router)
 app.include_router(similarity.router)
-app.include_router(stats_generator.router)
 app.include_router(scheduler.router)
 app.include_router(mcp.router)
