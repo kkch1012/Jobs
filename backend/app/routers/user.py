@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.database import get_db
 from app.models.user import User
 from app.models.user_skill import UserSkill
@@ -11,12 +12,13 @@ from app.schemas.user import (
     ResumeUpdate,
     UserResumeResponse
 )
-from app.utils.dependencies import get_current_user
+from app.utils.dependencies import get_current_user, get_optional_current_user
 from app.core.security import get_password_hash
 from app.models.skill import Skill
 from app.models.certificate import Certificate
 from app.models.user_experience import UserExperience
-from app.services.similarity_scores import auto_compute_user_similarity 
+from app.services.similarity_scores import auto_compute_user_similarity
+from app.services.jobs_gap import get_job_recommendation_simple 
 
 router = APIRouter(prefix="/users", tags=["User"])
 
@@ -197,4 +199,76 @@ def get_my_resume(
         "skills": skill_list,
         "certificates": certificate_list
     }
+
+@router.get("/desired-job", 
+            operation_id="get_desired_job",
+            summary="희망직무 조회",
+            description="""
+회원/비회원 모두 사용할 수 있는 희망직무 조회 엔드포인트입니다.
+
+- 인증이 필요하지 않습니다.
+- 회원인 경우: 설정된 희망직무를 반환합니다.
+- 회원이지만 희망직무가 없는 경우: 직무 추천 시스템을 통해 추천된 직무를 반환합니다.
+- 비회원인 경우: "프론트엔드 개발자"를 기본값으로 반환합니다.
+- 희망직무가 여러 개인 경우 첫 번째 희망직무를 반환합니다.
+
+**응답 예시:**
+```
+"백엔드 개발자"
+```
+""")
+def get_desired_job(
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
+):
+    """
+    회원/비회원 모두 사용할 수 있는 희망직무 조회 엔드포인트입니다.
+    """
+    try:
+        # 비회원인 경우
+        if not current_user:
+            return "프론트엔드 개발자"
+        
+        # 디버깅을 위한 로그 추가
+        print(f"=== 희망직무 디버깅 ===")
+        print(f"사용자 ID: {current_user.id}")
+        print(f"사용자 이메일: {current_user.email}")
+        print(f"희망직무 데이터: {current_user.desired_job}")
+        print(f"희망직무 타입: {type(current_user.desired_job)}")
+        print(f"희망직무가 비어있는지: {not current_user.desired_job}")
+        print(f"희망직무 길이: {len(current_user.desired_job) if isinstance(current_user.desired_job, list) else 'N/A'}")
+        print(f"========================")
+        
+        # 회원이지만 희망직무가 없는 경우 - 직무 추천 시스템 연동
+        if not current_user.desired_job:
+            try:
+                # 간단한 직무 추천 시스템 호출
+                recommended_job = get_job_recommendation_simple(current_user, db)
+                if recommended_job:
+                    return recommended_job
+                else:
+                    # 추천 실패 시 기본값 반환
+                    return "프론트엔드 개발자"
+            except Exception as e:
+                # 추천 시스템 오류 시 기본값 반환
+                print(f"직무 추천 시스템 오류: {str(e)}")
+                return "프론트엔드 개발자"
+        
+        # 희망직무가 리스트인 경우 첫 번째 항목 반환, 문자열인 경우 그대로 반환
+        if isinstance(current_user.desired_job, list):
+            if len(current_user.desired_job) > 0:
+                print(f"리스트에서 첫 번째 희망직무 반환: {current_user.desired_job[0]}")
+                return current_user.desired_job[0]
+            else:
+                print("빈 리스트이므로 기본값 반환")
+                return "프론트엔드 개발자"
+        else:
+            # 문자열인 경우
+            print(f"문자열 희망직무 반환: {current_user.desired_job}")
+            return current_user.desired_job
+            
+    except Exception as e:
+        # 기타 예외 발생 시 (비회원으로 처리)
+        print(f"희망직무 조회 중 예외 발생: {str(e)}")
+        return "프론트엔드 개발자"
 

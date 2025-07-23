@@ -3,9 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from starlette.responses import JSONResponse
 from datetime import datetime
+from collections import Counter
 import pytz
 from app.database import get_db
 from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_post import JobPost
+from app.models.user_skill import UserSkill
 from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
 from app.utils.dependencies import get_current_user
 from app.models.user import User
@@ -14,6 +17,7 @@ from app.services.weekly_stats_service import WeeklyStatsService
 from app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel
 from app.services.roadmap_model import get_roadmap_recommendations
 from app.services.statistics_service import StatisticsService
+from app.utils.text_utils import clean_markdown_text
 import logging
 
 logger = logging.getLogger(__name__)
@@ -67,15 +71,20 @@ async def generate_daily_stats(
     description="""
 특정 직무의 일간 스킬 통계를 조회합니다.
 
-- tech_stack, required_skills, preferred_skills, main_tasks_skills 4개 필드 통계를 모두 조회
-- 미리 계산된 통계 데이터를 빠르게 조회합니다.
+- field_type 파라미터로 분석할 필드를 선택할 수 있습니다.
 - date 파라미터로 특정 날짜를 조회할 수 있습니다 (YYYY-MM-DD 형식).
 - 기본값은 오늘 날짜입니다.
+- 미리 계산된 통계 데이터를 빠르게 조회합니다.
 - 실행 시점 날짜 기준으로 생성된 통계를 조회합니다.
 """
 )
 async def get_daily_stats(
     job_name: str,
+    field_type: str = Query(
+        "tech_stack",
+        enum=["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"],
+        description="분석할 필드 타입"
+    ),
     date: str | None = None,  # 특정 날짜 입력 (YYYY-MM-DD 형식, 기본값: 오늘 날짜)
     db: Session = Depends(get_db)
 ):
@@ -101,39 +110,28 @@ async def get_daily_stats(
         if not job_role:
             raise HTTPException(status_code=404, detail=f"직무 '{job_name}'을 찾을 수 없습니다.")
         
-        field_types = ["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"]
-        all_stats = {}
+        # 2. 해당 필드의 일간 통계 조회
+        stats = db.query(WeeklySkillStatModel).filter(
+            WeeklySkillStatModel.job_role_id == job_role.id,
+            WeeklySkillStatModel.field_type == field_type,
+            WeeklySkillStatModel.date == target_date
+        ).order_by(
+            WeeklySkillStatModel.count.desc(),
+            WeeklySkillStatModel.skill.asc()
+        ).all()
         
-        for field_type in field_types:
-            # 특정 날짜의 데이터만 조회 (효율적인 쿼리)
-            stats = db.query(WeeklySkillStatModel).filter(
-                WeeklySkillStatModel.job_role_id == job_role.id,
-                WeeklySkillStatModel.field_type == field_type,
-                WeeklySkillStatModel.date == target_date
-            ).order_by(
-                WeeklySkillStatModel.count.desc(),
-                WeeklySkillStatModel.skill.asc()
-            ).all()
-            
-            # 응답 형식으로 변환
-            formatted_stats = []
-            for stat in stats:
-                formatted_stats.append({
-                    "week": stat.week,
-                    "date": stat.date.isoformat(),
-                    "skill": stat.skill,
-                    "count": stat.count
-                })
-            
-            all_stats[field_type] = formatted_stats
+        # 3. 응답 형식으로 변환
+        result = []
+        for stat in stats:
+            result.append({
+                "week": stat.week,
+                "date": stat.date.isoformat() if stat.date else None,
+                "skill": stat.skill,
+                "count": stat.count,
+                "field_type": stat.field_type
+            })
         
-        return {
-            "job_name": job_name,
-            "field_types": field_types,
-            "date": target_date.isoformat(),
-            "stats": all_stats,
-            "total_count": sum(len(stats) for stats in all_stats.values())
-        }
+        return result
         
     except Exception as e:
         logger.error(f"일간 스킬 통계 조회 실패: {str(e)}")
@@ -141,6 +139,88 @@ async def get_daily_stats(
             status_code=500,
             detail=f"일간 통계 조회 중 오류가 발생했습니다: {str(e)}"
         )
+
+@router.get(
+    "/weekly_stats/{job_name}",
+    summary="주간 스킬 통계 조회 (평균 계산)",
+    description="""
+특정 직무의 주간 스킬 통계를 조회합니다.
+- field_type 파라미터로 분석할 필드를 선택할 수 있습니다.
+- week 파라미터로 특정 주차를 조회할 수 있습니다.
+- 기본값은 현재 주차입니다.
+- 같은 주차의 여러 날짜 데이터를 스킬별로 그룹화하여 평균값을 계산합니다.
+- count는 해당 주차의 일별 count 평균값입니다.
+- total_count는 해당 주차의 일별 count 총합입니다.
+- date_count는 해당 주차에 데이터가 있는 날짜 수입니다.
+""",
+    response_model=List[Dict[str, Any]]
+)
+def get_weekly_stats_by_field(
+    job_name: str,
+    field_type: str = Query(
+        "tech_stack",
+        enum=["tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"],
+        description="분석할 필드 타입"
+    ),
+    week: Optional[int] = Query(None, description="특정 주차 (기본값: 현재 주차)"),
+    db: Session = Depends(get_db)
+):
+    """특정 필드의 주간 스킬 통계를 조회합니다."""
+    try:
+        # 1. 직무 조회
+        job_role = db.query(JobRequiredSkill).filter(
+            JobRequiredSkill.job_name == job_name
+        ).first()
+        
+        if not job_role:
+            raise HTTPException(status_code=404, detail=f"직무 '{job_name}'을 찾을 수 없습니다.")
+        
+        # 2. 주차 설정
+        if week is None:
+            kst = pytz.timezone('Asia/Seoul')
+            current_date = datetime.now(kst)
+            week = current_date.isocalendar()[1]
+        
+        # 3. 해당 필드의 주간 통계 조회 (SQL 집계 사용)
+        from sqlalchemy import func
+        
+        # 같은 주차의 여러 날짜 데이터를 스킬별로 그룹화하여 평균 계산
+        aggregated_stats = db.query(
+            WeeklySkillStatModel.skill,
+            func.avg(WeeklySkillStatModel.count).label('avg_count'),
+            func.sum(WeeklySkillStatModel.count).label('total_count'),
+            func.count(WeeklySkillStatModel.date).label('date_count')
+        ).filter(
+            WeeklySkillStatModel.job_role_id == job_role.id,
+            WeeklySkillStatModel.field_type == field_type,
+            WeeklySkillStatModel.week == week
+        ).group_by(
+            WeeklySkillStatModel.skill
+        ).order_by(
+            func.avg(WeeklySkillStatModel.count).desc(),
+            WeeklySkillStatModel.skill.asc()
+        ).all()
+        
+        # 4. 응답 형식으로 변환 (평균값 사용)
+        result = []
+        for stat in aggregated_stats:
+            result.append({
+                "week": week,
+                "date": None,  # 주간 평균이므로 개별 날짜는 None
+                "skill": stat.skill,
+                "count": round(stat.avg_count, 2),  # 평균값을 소수점 2자리까지 반올림
+                "field_type": field_type,
+                "total_count": stat.total_count,  # 총합 (참고용)
+                "date_count": stat.date_count     # 데이터가 있는 날짜 수 (참고용)
+            })
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"주간 스킬 통계 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"주간 통계 조회 중 오류가 발생했습니다: {str(e)}")
 
 @router.get(
     "/weekly_skill_frequency",
@@ -185,7 +265,7 @@ def weekly_skill_frequency(
     try:
         # StatisticsService 사용
         result = StatisticsService.get_weekly_skill_frequency_range(
-            job_name, start_week, end_week, year, db
+            job_name, start_week, end_week, year, field, db
         )
         
         # 응답 형식 변환
@@ -312,10 +392,8 @@ async def resume_vs_job_skill_trend(
         JobPost.posting_date,
         getattr(JobPost, field)
     ).filter(
-        and_(
-            JobPost.job_required_skill_id == job_role_id,
-            or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
-        )
+        JobPost.job_required_skill_id == job_role_id,
+        JobPost.is_expired.is_(None) | JobPost.is_expired.is_(False)
     ).all()
     
     skill_counter = Counter()
@@ -390,8 +468,11 @@ def gap_analysis_endpoint(
             raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
         result = perform_gap_analysis_visualization(user_id, category, db=db)
 
-        # 1. 프론트에 보여줄 자연어 결과
+        # 1. 프론트에 보여줄 자연어 결과 (마크다운 형식 제거)
         gap_result = result["gap_result"]
+        
+        # 마크다운 형식 제거
+        gap_result = clean_markdown_text(gap_result)
 
         # 2. 내부 To-Do 시스템으로 보낼 Top 5 스킬
         top_skills = result["top_skills"]
@@ -399,7 +480,7 @@ def gap_analysis_endpoint(
         # send_to_todo(user_id, top_skills)
 
         return {
-            "gap_result": gap_result,      # 프론트에 출력할 자연어
+            "gap_result": gap_result,      # 프론트에 출력할 자연어 (마크다운 제거됨)
             "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능
         }
 
@@ -452,11 +533,6 @@ def skill_search(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"스킬 검색 실패: {str(e)}")
-        
-    except Exception as e:
-        import traceback
-        error_detail = f"스킬 검색 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
-        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get(
     "/roadmap_recommendations",

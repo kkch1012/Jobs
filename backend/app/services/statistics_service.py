@@ -1,9 +1,9 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_
 from datetime import datetime, timedelta
 import pytz
-from collections import Counter, defaultdict
+from collections import defaultdict
 from app.models.weekly_skill_stat import WeeklySkillStat
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.user_skill import UserSkill
@@ -26,7 +26,7 @@ class StatisticsService:
         if not job_role:
             raise ValueError(f"직무 '{job_name}'을 찾을 수 없습니다.")
         
-        return job_role.job_role_id
+        return job_role.id
     
     @staticmethod
     def get_weekly_stats(job_name: str, week: Optional[int] = None, db: Session = None) -> List[Dict[str, Any]]:
@@ -50,8 +50,8 @@ class StatisticsService:
             
             return [
                 {
-                    "skill_name": stat.skill_name,
-                    "frequency": stat.frequency,
+                    "skill_name": stat.skill,
+                    "frequency": stat.count,
                     "week": stat.week,
                     "job_role_id": stat.job_role_id
                 }
@@ -68,6 +68,7 @@ class StatisticsService:
         start_week: int, 
         end_week: int, 
         year: int, 
+        field: str,
         db: Session
     ) -> List[Dict[str, Any]]:
         """특정 기간의 주간 스킬 빈도를 조회합니다."""
@@ -77,6 +78,7 @@ class StatisticsService:
             stats = db.query(WeeklySkillStat).filter(
                 and_(
                     WeeklySkillStat.job_role_id == job_role_id,
+                    WeeklySkillStat.field_type == field,
                     WeeklySkillStat.week >= start_week,
                     WeeklySkillStat.week <= end_week
                 )
@@ -86,8 +88,8 @@ class StatisticsService:
             weekly_data = defaultdict(list)
             for stat in stats:
                 weekly_data[stat.week].append({
-                    "skill_name": stat.skill_name,
-                    "frequency": stat.frequency
+                    "skill_name": stat.skill,
+                    "frequency": stat.count
                 })
             
             return [
@@ -115,7 +117,7 @@ class StatisticsService:
             current_week = current_date.isocalendar()[1]
             
             return StatisticsService.get_weekly_skill_frequency_range(
-                job_name, current_week, current_week, current_date.year, db
+                job_name, current_week, current_week, current_date.year, field, db
             )
             
         except Exception as e:
