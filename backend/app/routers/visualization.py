@@ -18,6 +18,7 @@ from app.models.weekly_skill_stat import WeeklySkillStat as WeeklySkillStatModel
 from app.services.roadmap_model import get_roadmap_recommendations
 from app.services.statistics_service import StatisticsService
 from app.utils.text_utils import clean_markdown_text
+from app.utils.redis_cache import redis_cache_manager
 import logging
 from functools import lru_cache
 import hashlib
@@ -27,22 +28,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/visualization", tags=["Visualization"])
 
 # 캐시를 위한 전역 변수
-_gap_analysis_cache = {}
-_roadmap_cache = {}
+# Redis 캐시 사용으로 변경
 _cache_ttl = timedelta(hours=1)  # 1시간 캐시
-
-def get_cache_key(user_id: int, category: str, cache_type: str = "gap_analysis") -> str:
-    """캐시 키 생성"""
-    return f"{cache_type}:{user_id}:{category}"
-
-def is_cache_valid(cache_entry: Dict[str, Any]) -> bool:
-    """캐시가 유효한지 확인"""
-    if not cache_entry:
-        return False
-    created_time = cache_entry.get('created_time')
-    if not created_time:
-        return False
-    return datetime.now() - created_time < _cache_ttl
 
 @router.post(
     "/generate/daily",
@@ -607,7 +594,7 @@ async def resume_vs_job_skill_trend(
 - 캐싱: 1시간 동안 같은 사용자와 카테고리에 대한 중복 분석을 방지합니다.
 """
 )
-def gap_analysis_endpoint(
+async def gap_analysis_endpoint(
     category: str = Query(..., description="직무 카테고리 (예: 프론트엔드 개발자)"),
     force_refresh: bool = Query(False, description="캐시를 무시하고 새로 분석 수행"),
     db: Session = Depends(get_db),
@@ -627,14 +614,14 @@ def gap_analysis_endpoint(
             raise HTTPException(status_code=400, detail="유저 ID를 확인할 수 없습니다.")
         
         # 캐시 키 생성
-        cache_key = get_cache_key(user_id, category, "gap_analysis")
+        cache_key = redis_cache_manager.generate_cache_key("gap_analysis", user_id=user_id, category=category)
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
-            cached_result = _gap_analysis_cache.get(cache_key)
-            if is_cache_valid(cached_result):
-                logger.info(f"캐시된 갭 분석 결과 반환: 사용자 {user_id}, 카테고리 {category}")
-                return cached_result['data']
+            cached_data = await redis_cache_manager.get_cached_data("gap_analysis", cache_key, _cache_ttl)
+            if cached_data is not None:
+                logger.info(f"Redis 캐시된 갭 분석 결과 반환: 사용자 {user_id}, 카테고리 {category}")
+                return cached_data
         
         # 캐시가 없거나 만료된 경우 새로 분석 수행
         logger.info(f"새로운 갭 분석 수행: 사용자 {user_id}, 카테고리 {category}")
@@ -656,11 +643,8 @@ def gap_analysis_endpoint(
             "top_skills": top_skills       # 프론트가 투두 리스트로 활용 가능
         }
         
-        # 캐시에 저장
-        _gap_analysis_cache[cache_key] = {
-            'data': response_data,
-            'created_time': datetime.now()
-        }
+        # Redis 캐시에 저장
+        await redis_cache_manager.set_cached_data("gap_analysis", cache_key, response_data, _cache_ttl)
         
         logger.info(f"갭 분석 완료 및 캐시 저장: 사용자 {user_id}, 카테고리 {category}")
         return response_data
@@ -673,7 +657,7 @@ def gap_analysis_endpoint(
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.delete("/cache/clear", summary="캐시 초기화", description="갭 분석 및 로드맵 추천 캐시를 모두 초기화합니다.")
-def clear_cache(
+async def clear_cache(
     current_user: User = Depends(get_current_user)
 ):
     """캐시를 초기화합니다."""
@@ -685,35 +669,22 @@ def clear_cache(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 사용자 관련 캐시 키 찾기
-        keys_to_remove = []
-        for cache_key in _gap_analysis_cache.keys():
-            if f":{user_id}:" in cache_key:
-                keys_to_remove.append(cache_key)
+        # Redis 캐시 삭제
+        cache_names = ["gap_analysis", "roadmap"]
+        deleted_count = await redis_cache_manager.clear_user_cache(user_id, cache_names)
         
-        for cache_key in _roadmap_cache.keys():
-            if f":{user_id}:" in cache_key:
-                keys_to_remove.append(cache_key)
-        
-        # 캐시 삭제
-        for key in keys_to_remove:
-            if key in _gap_analysis_cache:
-                del _gap_analysis_cache[key]
-            if key in _roadmap_cache:
-                del _roadmap_cache[key]
-        
-        logger.info(f"사용자 {user_id}의 캐시 {len(keys_to_remove)}개 삭제 완료")
+        logger.info(f"사용자 {user_id}의 Redis 캐시 {deleted_count}개 삭제 완료")
         
         return {
-            "message": f"캐시 {len(keys_to_remove)}개가 삭제되었습니다.",
-            "deleted_count": len(keys_to_remove)
+            "message": f"Redis 캐시 {deleted_count}개가 삭제되었습니다.",
+            "deleted_count": deleted_count
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"캐시 초기화 실패: {str(e)}")
 
 @router.get("/cache/status", summary="캐시 상태 조회", description="현재 캐시 상태를 조회합니다.")
-def get_cache_status(
+async def get_cache_status(
     current_user: User = Depends(get_current_user)
 ):
     """캐시 상태를 조회합니다."""
@@ -722,32 +693,7 @@ def get_cache_status(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 사용자 관련 캐시만 조회
-        user_gap_cache = {}
-        user_roadmap_cache = {}
-        
-        for cache_key, cache_data in _gap_analysis_cache.items():
-            if f":{user_id}:" in cache_key:
-                user_gap_cache[cache_key] = {
-                    "created_time": cache_data['created_time'].isoformat(),
-                    "is_valid": is_cache_valid(cache_data)
-                }
-        
-        for cache_key, cache_data in _roadmap_cache.items():
-            if f":{user_id}:" in cache_key:
-                user_roadmap_cache[cache_key] = {
-                    "created_time": cache_data['created_time'].isoformat(),
-                    "is_valid": is_cache_valid(cache_data)
-                }
-        
-        return {
-            "gap_analysis_cache": user_gap_cache,
-            "roadmap_cache": user_roadmap_cache,
-            "total_gap_cache": len(_gap_analysis_cache),
-            "total_roadmap_cache": len(_roadmap_cache),
-            "user_gap_cache_count": len(user_gap_cache),
-            "user_roadmap_cache_count": len(user_roadmap_cache)
-        }
+        return await redis_cache_manager.get_cache_status(user_id)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"캐시 상태 조회 실패: {str(e)}")
@@ -833,14 +779,13 @@ async def get_roadmap_recommendations_endpoint(
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
         # 캐시 키 생성
-        cache_key = get_cache_key(user_id, category, "roadmap")
+        cache_key = redis_cache_manager.generate_cache_key("roadmap", user_id=user_id, category=category)
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
-            cached_result = _roadmap_cache.get(cache_key)
-            if is_cache_valid(cached_result):
-                logger.info(f"캐시된 로드맵 추천 결과 반환: 사용자 {user_id}, 카테고리 {category}")
-                cached_data = cached_result['data']
+            cached_data = await redis_cache_manager.get_cached_data("roadmap", cache_key, _cache_ttl)
+            if cached_data is not None:
+                logger.info(f"Redis 캐시된 로드맵 추천 결과 반환: 사용자 {user_id}, 카테고리 {category}")
                 # type별 필터링 적용
                 if type:
                     filtered_roadmaps = [roadmap for roadmap in cached_data if roadmap.get('type') == type]
@@ -862,11 +807,8 @@ async def get_roadmap_recommendations_endpoint(
             limit=limit
         )
         
-        # 캐시에 저장
-        _roadmap_cache[cache_key] = {
-            'data': recommended_roadmaps,
-            'created_time': datetime.now()
-        }
+        # Redis 캐시에 저장
+        await redis_cache_manager.set_cached_data("roadmap", cache_key, recommended_roadmaps, _cache_ttl)
         
         logger.info(f"로드맵 추천 완료 및 캐시 저장: 사용자 {user_id}, 카테고리 {category}")
         

@@ -8,7 +8,7 @@ from app.database import get_db
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.job_post import JobPost
 from app.schemas.job_required_skill import JobNameResponse
-from app.utils.cache import cache_manager
+from app.utils.redis_cache import redis_cache_manager
 
 router = APIRouter(prefix="/job-skills", tags=["Job Required Skills"])
 
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/job-skills", tags=["Job Required Skills"])
     response_model=List[JobNameResponse],
     summary="직무명(이름만) 리스트 조회"
 )
-def get_job_names(
+async def get_job_names(
     force_refresh: bool = Query(False, description="캐시를 무시하고 새로 조회"),
     db: Session = Depends(get_db)
 ):
@@ -32,7 +32,7 @@ def get_job_names(
     
     # 캐시 확인 (force_refresh가 False인 경우만)
     if not force_refresh:
-        cached_data = cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
+        cached_data = await redis_cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
         if cached_data is not None:
             return cached_data
     
@@ -40,8 +40,8 @@ def get_job_names(
     job_names = db.query(JobRequiredSkill.job_name).all()
     result = [{"name": name[0]} for name in job_names]
     
-    # 캐시에 저장
-    cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
+    # Redis 캐시에 저장
+    await redis_cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
     
     return result
 
@@ -51,7 +51,7 @@ def get_job_names(
     response_model=List[JobNameResponse],
     summary="채용공고가 없는 직무명 리스트 조회"
 )
-def get_job_names_without_posts(
+async def get_job_names_without_posts(
     force_refresh: bool = Query(False, description="캐시를 무시하고 새로 조회"),
     db: Session = Depends(get_db)
 ):
@@ -65,7 +65,7 @@ def get_job_names_without_posts(
     
     # 캐시 확인 (force_refresh가 False인 경우만)
     if not force_refresh:
-        cached_data = cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
+        cached_data = await redis_cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
         if cached_data is not None:
             return cached_data
     
@@ -78,8 +78,8 @@ def get_job_names_without_posts(
     
     result = [{"name": name[0]} for name in jobs_without_posts]
     
-    # 캐시에 저장
-    cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
+    # Redis 캐시에 저장
+    await redis_cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
     
     return result
 
@@ -89,7 +89,7 @@ def get_job_names_without_posts(
     response_model=List[JobNameResponse],
     summary="채용공고가 있는 직무명 리스트 조회"
 )
-def get_job_names_with_posts(
+async def get_job_names_with_posts(
     force_refresh: bool = Query(False, description="캐시를 무시하고 새로 조회"),
     db: Session = Depends(get_db)
 ):
@@ -103,7 +103,7 @@ def get_job_names_with_posts(
     
     # 캐시 확인 (force_refresh가 False인 경우만)
     if not force_refresh:
-        cached_data = cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
+        cached_data = await redis_cache_manager.get_cached_data("job_names", cache_key, timedelta(minutes=30))
         if cached_data is not None:
             return cached_data
     
@@ -114,26 +114,20 @@ def get_job_names_with_posts(
     
     result = [{"name": name[0]} for name in jobs_with_posts]
     
-    # 캐시에 저장
-    cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
+    # Redis 캐시에 저장
+    await redis_cache_manager.set_cached_data("job_names", cache_key, result, timedelta(minutes=30))
     
     return result
 
 @router.delete("/cache/clear", summary="직무명 캐시 초기화", description="직무명 관련 캐시를 모두 초기화합니다.")
-def clear_job_names_cache():
+async def clear_job_names_cache():
     """직무명 캐시를 초기화합니다."""
     try:
-        deleted_count = 0
-        cache = cache_manager.get_cache("job_names")
-        
-        # 모든 직무명 캐시 삭제
-        keys_to_remove = list(cache.keys())
-        for key in keys_to_remove:
-            del cache[key]
-            deleted_count += 1
+        # 모든 직무명 관련 캐시 삭제
+        deleted_count = await redis_cache_manager.clear_user_cache(None, ["job_names"])
         
         return {
-            "message": "직무명 캐시가 초기화되었습니다.",
+            "message": "직무명 Redis 캐시가 초기화되었습니다.",
             "deleted_cache_count": deleted_count
         }
         
@@ -142,22 +136,10 @@ def clear_job_names_cache():
         raise HTTPException(status_code=500, detail=f"캐시 초기화 실패: {str(e)}")
 
 @router.get("/cache/status", summary="직무명 캐시 상태 조회", description="현재 직무명 캐시 상태를 조회합니다.")
-def get_job_names_cache_status():
+async def get_job_names_cache_status():
     """직무명 캐시 상태를 조회합니다."""
     try:
-        cache = cache_manager.get_cache("job_names")
-        
-        cache_status = {}
-        for cache_key, cache_data in cache.items():
-            cache_status[cache_key] = {
-                "created_time": cache_data['created_time'].isoformat(),
-                "is_valid": cache_manager.is_cache_valid(cache_data, timedelta(minutes=30))
-            }
-        
-        return {
-            "job_names_cache": cache_status,
-            "total_cache_count": len(cache)
-        }
+        return await redis_cache_manager.get_cache_status(None)
         
     except Exception as e:
         from fastapi import HTTPException

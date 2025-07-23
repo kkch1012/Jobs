@@ -12,5 +12,6 @@ class UserSimilarity(Base):
     similarity = Column(Float, nullable=False)  # 유사도,적합도 (예: 0.856)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 생성 시간
 
-UserSimilarity.job_post = relationship("JobPost", back_populates="user_similarities")
-UserSimilarity.user = relationship("User", back_populates="user_similarities")
+    # 관계 설정
+    job_post = relationship("JobPost", back_populates="user_similarities")
+    user = relationship("User", back_populates="user_similarities")

@@ -24,6 +24,7 @@ class JobPostSimpleResponse(BaseModel):
     """추천 시스템용 최소 스키마"""
     id: int
     title: str
+    company_name: str
     tech_stack: Optional[str] = None
     similarity: Optional[float] = None
 

@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Callable
 from functools import wraps
-import aioredis
+import redis.asyncio as redis
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class RedisCacheManager:
     async def get_redis(self):
         """Redis 연결 가져오기"""
         if self._redis is None:
-            self._redis = await aioredis.from_url(self.redis_url, decode_responses=True)
+            self._redis = redis.from_url(self.redis_url, decode_responses=True)
         return self._redis
     
     async def close(self):
