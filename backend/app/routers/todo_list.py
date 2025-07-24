@@ -127,11 +127,11 @@ async def generate_schedule_from_favorites(
         limit=50  # 더 많은 로드맵을 가져와서 선택
     )
     
-    # 4. 부족한 스킬에 매칭되는 강의들 필터링
+    # 4. 부족한 스킬에 매칭되는 강의들 필터링 (강의는 기간 제한 없음)
     matching_courses = []
     for roadmap in recommended_roadmaps:
         if roadmap.get('type') == '강의':
-            # skill_description에서 스킬 추출
+            # 강의는 기간 상관없이 모두 포함
             skill_description = roadmap.get('skill_description', [])
             if isinstance(skill_description, str):
                 try:
@@ -152,18 +152,58 @@ async def generate_schedule_from_favorites(
                         "url": roadmap.get('url'),
                         "matched_skill": skill
                     })
+                    app_logger.info(f"강의 '{roadmap.get('name')}' 추천: 스킬 매칭 ({skill})")
                     break  # 한 스킬이라도 매칭되면 추가
     
-    # 5. 찜한 로드맵과 매칭 강의를 합쳐서 최종 로드맵 목록 생성
+    # 5. 찜한 로드맵과 매칭 강의를 합쳐서 최종 로드맵 목록 생성 (기간 고려)
     final_roadmaps = []
     
-    # 찜한 부트캠프는 1-2개만 포함
+    # 찜한 부트캠프도 기간 확인 후 추가
     bootcamps = [r for r in favorites['roadmaps'] if r.get('type') != '강의']
-    final_roadmaps.extend(bootcamps[:2])  # 최대 2개
+    suitable_bootcamps = []
     
-    # 찜한 강의들 추가
+    for bootcamp in bootcamps:
+        start_date = bootcamp.get('start_date')
+        end_date = bootcamp.get('end_date')
+        
+        if start_date and end_date:
+            try:
+                if isinstance(start_date, str):
+                    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                else:
+                    start_dt = start_date
+                
+                if isinstance(end_date, str):
+                    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                else:
+                    end_dt = end_date
+                
+                bootcamp_duration = (end_dt - start_dt).days
+                
+                # 부트캠프는 좀 더 관대하게 판단 (2배까지 허용)
+                if bootcamp_duration <= days * 2:
+                    suitable_bootcamps.append(bootcamp)
+                    app_logger.info(f"부트캠프 '{bootcamp.get('name')}' 추천: 기간 적합 ({bootcamp_duration}일)")
+                else:
+                    app_logger.info(f"부트캠프 '{bootcamp.get('name')}' 제외: 기간이 너무 김 ({bootcamp_duration}일 > {days * 2}일)")
+                    
+            except (ValueError, TypeError) as e:
+                app_logger.warning(f"부트캠프 '{bootcamp.get('name')}' 날짜 파싱 실패: {str(e)}")
+                # 날짜 파싱 실패시 제외
+                continue
+        else:
+            # 날짜 정보가 없는 부트캠프는 제외
+            app_logger.info(f"부트캠프 '{bootcamp.get('name')}' 제외: 날짜 정보 없음")
+            continue
+    
+    final_roadmaps.extend(suitable_bootcamps[:2])  # 최대 2개
+    
+    # 찜한 강의들은 기간 상관없이 모두 추가
     favorite_courses = [r for r in favorites['roadmaps'] if r.get('type') == '강의']
     final_roadmaps.extend(favorite_courses)
+    
+    for course in favorite_courses:
+        app_logger.info(f"찜한 강의 '{course.get('name')}' 추천: 사용자가 찜한 강의")
     
     # 매칭된 강의들 추가 (중복 제거)
     existing_ids = {r.get('id') for r in final_roadmaps}
@@ -174,6 +214,15 @@ async def generate_schedule_from_favorites(
     
     # 최대 10개로 제한
     final_roadmaps = final_roadmaps[:10]
+    
+    app_logger.info(f"최종 선택된 로드맵/강의: {len(final_roadmaps)}개 (요청 기간: {days}일)")
+    for roadmap in final_roadmaps:
+        roadmap_type = roadmap.get('type', '알 수 없음')
+        if roadmap_type == '강의':
+            app_logger.info(f"- {roadmap.get('name')} (강의) - 기간 제한 없음")
+        else:
+            duration_info = roadmap.get('duration_days', '알 수 없음')
+            app_logger.info(f"- {roadmap.get('name')} ({roadmap_type}) - 기간: {duration_info}일")
     
     # 6. LLM을 통한 일정 생성
     # 현재 날짜 계산
@@ -191,22 +240,29 @@ async def generate_schedule_from_favorites(
     [찜한 로드맵 목록]
     {json.dumps(favorites['roadmaps'], ensure_ascii=False, default=str)}
     
-    [추천 로드맵 목록 (부족한 스킬에 매칭되는 강의 포함)]
+    [추천 로드맵 목록 (기간에 맞는 것만 선별됨)]
     {json.dumps(final_roadmaps, ensure_ascii=False, default=str)}
     
     [찜한 공고 목록]
     {json.dumps(favorites['job_posts'], ensure_ascii=False, default=str)}
     
-    요구사항]
-    1. 찜한 부트캠프는 1-2개만 포함하고, 나머지는 강의 위주로 구성
-    2. 부족한 스킬에 매칭되는 강의들을 우선적으로 일정에 포함
-    3. 찜한 로드맵의 시작일/마감일을 고려한 일정 배치
-    4. 찜한 공고의 마감일을 고려한 준비 일정
-    5. 상위 10개 기술 스택 학습 계획
-    6. 일별 구체적인 학습 목표와 태스크 설정
-    7. 주말에는 복습과 실습 프로젝트 포함
-    8. 공고 마감일 전 준비 완료되도록 일정 조정
-    9. 날짜는 오늘({current_date.strftime('%Y-%m-%d')})부터 시작하여 {days}일간 설정
+    [요구사항]
+    1. **기간 준수**: 총 {days}일 기간에 맞춰 일정을 구성해주세요
+    2. **로드맵 우선순위**: 추천 로드맵 목록의 부트캠프는 기간이 검증되었고, 강의는 기간 제한 없이 활용 가능
+    3. **부트캠프 제한**: 찜한 부트캠프는 1-2개만 포함하고, 나머지는 강의 위주로 구성
+    4. **스킬 학습 계획**: 부족한 스킬에 매칭되는 강의들을 우선적으로 일정에 포함
+    5. **마감일 고려**: 찜한 로드맵의 시작일/마감일을 고려한 일정 배치
+    6. **공고 준비**: 찜한 공고의 마감일을 고려한 준비 일정
+    7. **일별 목표**: 일별 구체적인 학습 목표와 태스크 설정
+    8. **주말 활용**: 주말에는 복습과 실습 프로젝트 포함
+    9. **현실적 계획**: 공고 마감일 전 준비 완료되도록 일정 조정
+    10. **날짜 설정**: 오늘({current_date.strftime('%Y-%m-%d')})부터 시작하여 {days}일간 설정
+    
+    [중요 알림]
+    - 부트캠프는 요청 기간({days}일)에 적합한 것들만 선별되었습니다
+    - 강의는 기간 제한 없이 모든 관련 강의가 포함되어 있습니다
+    - 로드맵이 부족한 경우, 스킬 학습 위주로 일정을 구성해주세요
+    - 무리한 일정보다는 현실적이고 달성 가능한 계획을 세워주세요
     
     출력 형식]
     다음 JSON 형태로 응답해주세요:
