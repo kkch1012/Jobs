@@ -1,7 +1,8 @@
 import json
-from fastapi import APIRouter, HTTPException, Depends, Body, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
 from datetime import datetime
 from sqlalchemy.orm import Session
+from app.utils.logger import app_logger
 from app.database import get_db
 from app.models.mongo import MCPMessage
 from app.schemas.mcp import MessageIn
@@ -125,13 +126,19 @@ def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, An
 
 async def save_message_to_mongo(session_id: int, role: str, content: str):
     """MongoDB에 메시지를 저장합니다."""
-    msg = MCPMessage(
-        session_id=session_id,
-        role=role,
-        content=content,
-        created_at=datetime.utcnow()
-    )
-    await msg.insert()
+    try:
+        msg = MCPMessage(
+            session_id=session_id,
+            role=role,
+            content=content,
+            created_at=datetime.utcnow()
+        )
+        await msg.insert()
+        app_logger.debug(f"MongoDB 메시지 저장 성공: session_id={session_id}, role={role}")
+    except Exception as e:
+        app_logger.error(f"MongoDB 메시지 저장 실패: {str(e)}")
+        # MongoDB 저장 실패는 전체 요청을 중단시키지 않음
+        raise
 
 async def generate_llm_summary(intent: str, mcp_result: Dict[str, Any], model: str) -> str:
     """LLM을 사용하여 MCP 결과를 자연어로 요약합니다."""
@@ -174,16 +181,27 @@ async def chat_with_llm(
     request: Request,
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
-    model: str = Body("qwen/qwen-vl-max", example="qwen/qwen-vl-max")
+    model: str = "qwen/qwen-vl-max"
 ):
     try:
         # 0. 사용자 메시지 저장
-        await save_message_to_mongo(data.session_id, "user", data.message)
+        try:
+            await save_message_to_mongo(data.session_id, "user", data.message)
+        except Exception as e:
+            app_logger.error(f"사용자 메시지 MongoDB 저장 실패: {str(e)}")
+            # MongoDB 저장 실패해도 계속 진행
 
         # 1. LLM으로 intent 분석
-        intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
-        intent = intent_json.get("intent", "general")
-        parameters = intent_json.get("parameters", {})
+        try:
+            app_logger.debug(f"LLM intent 분석 시작: message='{data.message[:50]}...'")
+            intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
+            intent = intent_json.get("intent", "general")
+            parameters = intent_json.get("parameters", {})
+            app_logger.debug(f"LLM intent 분석 성공: intent={intent}, parameters={parameters}")
+        except Exception as e:
+            app_logger.error(f"LLM intent 분석 실패: {str(e)}")
+            intent = "general"
+            parameters = {}
 
         # 2. 도구 호출이 필요한 intent 처리
         mcp_result = None
@@ -194,22 +212,32 @@ async def chat_with_llm(
             try:
                 mcp_result = await mcp_client.call_tool(intent, parameters)
             except Exception as e:
+                app_logger.error(f"MCP 도구 호출 실패: {str(e)}")
                 error_content = f"MCP 도구 호출 실패: {str(e)}"
-                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                try:
+                    await save_message_to_mongo(data.session_id, "assistant", error_content)
+                except:
+                    pass
                 return create_error_response(data.session_id, error_content)
 
         # 3. 인증이 필요한 intent 처리
         elif intent in ["get_my_resume", "update_resume", "job_recommendation"]:
             if not current_user:
                 error_content = "로그인이 필요합니다."
-                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                try:
+                    await save_message_to_mongo(data.session_id, "assistant", error_content)
+                except:
+                    pass
                 return create_error_response(data.session_id, error_content, 401, "login")
             
             # 인증 토큰 추출
             auth_header = request.headers.get("authorization")
             if not auth_header:
                 error_content = "인증 토큰이 필요합니다."
-                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                try:
+                    await save_message_to_mongo(data.session_id, "assistant", error_content)
+                except:
+                    pass
                 return create_error_response(data.session_id, error_content, 401)
             
             try:
@@ -220,21 +248,34 @@ async def chat_with_llm(
                 # auth_header는 위에서 None 체크를 했으므로 str 타입임이 보장됨
                 mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
             except Exception as e:
+                app_logger.error(f"인증 도구 호출 실패: {str(e)}")
                 error_content = f"인증 도구 호출 실패: {str(e)}"
-                await save_message_to_mongo(data.session_id, "assistant", error_content)
+                try:
+                    await save_message_to_mongo(data.session_id, "assistant", error_content)
+                except:
+                    pass
                 return create_error_response(data.session_id, error_content)
 
         # 4. 응답 생성
-        if mcp_result is not None:
-            # MCP 결과가 있는 경우 LLM 요약
-            answer = await generate_llm_summary(intent, mcp_result, model)
-        else:
-            # 일반 대화
-            answer = await llm_client.generate_response(data.message)
-            answer = (answer or "응답 생성 실패").strip()
+        try:
+            app_logger.debug(f"응답 생성 시작: intent={intent}, has_mcp_result={mcp_result is not None}")
+            if mcp_result is not None:
+                # MCP 결과가 있는 경우 LLM 요약
+                answer = await generate_llm_summary(intent, mcp_result, model)
+            else:
+                # 일반 대화
+                answer = await llm_client.generate_response(data.message)
+                answer = (answer or "응답 생성 실패").strip()
+            app_logger.debug(f"응답 생성 성공: answer_length={len(answer)}")
+        except Exception as e:
+            app_logger.error(f"응답 생성 실패: {str(e)}")
+            answer = "죄송합니다. 응답을 생성할 수 없습니다."
 
         # 5. 어시스턴트 메시지 저장
-        await save_message_to_mongo(data.session_id, "assistant", answer)
+        try:
+            await save_message_to_mongo(data.session_id, "assistant", answer)
+        except Exception as e:
+            app_logger.error(f"어시스턴트 메시지 저장 실패: {str(e)}")
 
         # 6. 응답 반환
         response = {
@@ -249,8 +290,12 @@ async def chat_with_llm(
         return response
 
     except Exception as e:
+        app_logger.error(f"채팅 처리 중 예상치 못한 오류: {str(e)}")
         error_content = f"채팅 처리 중 오류가 발생했습니다: {str(e)}"
-        await save_message_to_mongo(data.session_id, "assistant", error_content)
+        try:
+            await save_message_to_mongo(data.session_id, "assistant", error_content)
+        except:
+            pass
         return create_error_response(data.session_id, error_content)
 
 @router.get("/history", summary="세션별 채팅 이력 조회", description="특정 세션 ID의 모든 채팅 메시지(유저/AI)를 시간순으로 반환합니다.")

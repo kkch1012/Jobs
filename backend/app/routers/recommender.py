@@ -47,8 +47,8 @@ async def recommend_for_current_user(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 캐시 키 생성
-        cache_key = redis_cache_manager.generate_cache_key("job_recommendation", user_id=user_id)
+        # 캐시 키 생성 (단순화)
+        cache_key = f"user:{user_id}:recommendation"
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
@@ -104,8 +104,8 @@ async def get_recommended_job_ids(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 캐시 키 생성
-        cache_key = redis_cache_manager.generate_cache_key("job_ids", user_id=user_id)
+        # 캐시 키 생성 (단순화)
+        cache_key = f"user:{user_id}:job_ids"
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
@@ -322,12 +322,11 @@ def generate_job_explanations(
 - **페이지별 조회**: 한 페이지당 지정된 개수의 채용공고를 유사도 높은 순으로 반환
 - **페이징**: 프론트엔드에서 페이지 번호와 페이지당 개수를 지정하여 조회 가능
 - **응답**: 채용공고 상세 정보와 유사도 점수, 전체 페이지 수 포함
-- **캐싱**: 1시간 동안 같은 사용자와 페이지에 대한 중복 조회를 방지합니다.
+- **실시간 조회**: 매번 최신 데이터를 조회합니다 (캐시 사용 안함)
 
 **요청 파라미터:**
 - `page`: 페이지 번호 (기본값: 1)
 - `jobs_per_page`: 페이지당 공고 수 (기본값: 5, 최대: 50)
-- `force_refresh`: 캐시를 무시하고 새로 조회 (기본값: false)
 
 **응답 예시:**
 ```json
@@ -354,7 +353,6 @@ def generate_job_explanations(
 async def get_paginated_recommended_jobs(
     page: int = Query(1, ge=1, description="페이지 번호 (1부터 시작)"),
     jobs_per_page: int = Query(5, ge=1, le=50, description="페이지당 공고 수 (최대 50)"),
-    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 조회"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -363,18 +361,7 @@ async def get_paginated_recommended_jobs(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 캐시 키 생성
-        cache_key = redis_cache_manager.generate_cache_key("job_paginated", user_id=user_id, page=page, jobs_per_page=jobs_per_page)
-        
-        # 캐시 확인 (force_refresh가 False인 경우만)
-        if not force_refresh:
-            cached_data = await redis_cache_manager.get_cached_data("job_paginated", cache_key, timedelta(hours=1))
-            if cached_data is not None:
-                logger.info(f"Redis 캐시된 페이지별 채용공고 추천 결과 반환: 사용자 {user_id}, 페이지 {page}")
-                return cached_data
-        
-        # 캐시가 없거나 만료된 경우 새로 조회 수행
-        logger.info(f"새로운 페이지별 채용공고 추천 수행: 사용자 {user_id}, 페이지 {page}")
+        logger.info(f"페이지별 채용공고 조회 수행: 사용자 {user_id}, 페이지 {page}")
         
         from app.models.job_post import JobPost
         from app.models.user_similarity import UserSimilarity
@@ -405,8 +392,6 @@ async def get_paginated_recommended_jobs(
                 "message": "회원님과 유사한 채용공고를 찾지 못했습니다."
             }
             
-            # Redis 캐시에 저장
-            await redis_cache_manager.set_cached_data("job_paginated", cache_key, response_data, timedelta(hours=1))
             return response_data
         
         # 페이지네이션 계산
@@ -437,10 +422,7 @@ async def get_paginated_recommended_jobs(
             }
         }
         
-        # Redis 캐시에 저장
-        await redis_cache_manager.set_cached_data("job_paginated", cache_key, response_data, timedelta(hours=1))
-        
-        logger.info(f"페이지별 채용공고 추천 완료 및 캐시 저장: 사용자 {user_id}, 페이지 {page}")
+        logger.info(f"페이지별 채용공고 조회 완료: 사용자 {user_id}, 페이지 {page}")
         return response_data
             
     except Exception as e:
@@ -474,8 +456,8 @@ async def recommend_job_for_current_user(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 캐시 키 생성
-        cache_key = redis_cache_manager.generate_cache_key("job_recommendation", user_id=user_id, verbose=verbose)
+        # 캐시 키 생성 (단순화)
+        cache_key = f"user:{user_id}:job_recommendation:verbose:{verbose}"
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
@@ -535,8 +517,8 @@ async def get_simple_job_recommendation(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 캐시 키 생성
-        cache_key = redis_cache_manager.generate_cache_key("job_simple", user_id=user_id)
+        # 캐시 키 생성 (단순화)
+        cache_key = f"user:{user_id}:job_simple"
         
         # 캐시 확인 (force_refresh가 False인 경우만)
         if not force_refresh:
@@ -576,9 +558,23 @@ async def clear_recommendation_cache(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        # 추천 관련 캐시들
-        cache_names = ["job_recommendation", "job_ids", "job_explanation", "job_paginated"]
-        deleted_count = await redis_cache_manager.clear_user_cache(user_id, cache_names)
+        # 추천 관련 캐시들 (단순화된 키 패턴)
+        try:
+            redis = await redis_cache_manager.get_redis()
+            patterns = [
+                f"job_recommendation:user:{user_id}:*", 
+                f"job_ids:user:{user_id}:*",
+                f"job_simple:user:{user_id}:*"
+            ]
+            deleted_count = 0
+            for pattern in patterns:
+                keys = await redis.keys(pattern)
+                if keys:
+                    deleted_count += await redis.delete(*keys)
+                    logger.info(f"캐시 삭제: {pattern} - {len(keys)}개 키 삭제")
+        except Exception as e:
+            logger.error(f"캐시 삭제 중 오류: {str(e)}")
+            deleted_count = 0
         
         return {
             "message": "추천 캐시가 초기화되었습니다.",
@@ -599,7 +595,29 @@ async def get_recommendation_cache_status(
         if user_id is None:
             raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
         
-        return await redis_cache_manager.get_cache_status(user_id)
+        # 캐시 상태 조회 (단순화)
+        try:
+            redis = await redis_cache_manager.get_redis()
+            patterns = [
+                f"job_recommendation:user:{user_id}:*", 
+                f"job_ids:user:{user_id}:*",
+                f"job_simple:user:{user_id}:*"
+            ]
+            cache_status = {}
+            for pattern in patterns:
+                keys = await redis.keys(pattern)
+                cache_status[pattern] = {
+                    "count": len(keys),
+                    "keys": keys[:5] if keys else []  # 최대 5개까지만 표시
+                }
+            return {
+                "user_id": user_id,
+                "cache_status": cache_status,
+                "total_cached_keys": sum(cache_status[p]["count"] for p in cache_status)
+            }
+        except Exception as e:
+            logger.error(f"캐시 상태 조회 중 오류: {str(e)}")
+            return {"error": str(e)}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"캐시 상태 조회 실패: {str(e)}")
