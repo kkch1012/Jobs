@@ -29,5 +29,16 @@ class Settings(BaseSettings):
     # Server URLs
     FASTAPI_SERVER_URL: str = os.getenv("FASTAPI_SERVER_URL", "http://localhost:8000")
     MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8001")
+    
+    # CORS 설정
+    CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001").split(",")
+    
+    # 배치 작업 설정
+    BATCH_SCHEDULE_HOUR: int = int(os.getenv("BATCH_SCHEDULE_HOUR", "8"))
+    BATCH_SCHEDULE_MINUTE: int = int(os.getenv("BATCH_SCHEDULE_MINUTE", "0"))
+    
+    # 유사도 계산 설정
+    SIMILARITY_TOP_K: int = int(os.getenv("SIMILARITY_TOP_K", "30"))
+    SIMILARITY_LIMIT: int = int(os.getenv("SIMILARITY_LIMIT", "20"))
 
 settings = Settings()

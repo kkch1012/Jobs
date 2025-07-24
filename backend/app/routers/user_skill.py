@@ -75,7 +75,7 @@ def get_user_skills(
           .all()
     )
     # 디버깅용 로그 출력
-    print(user_skills)
+    app_logger.debug(f"사용자 스킬 조회: {len(user_skills)}개")
     # UserSkill 객체와 skill_name 튜플을 UserSkillResponse 리스트로 변환
     return [
     UserSkillResponse(

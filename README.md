@@ -66,7 +66,7 @@ pip install -r requirements.txt
 
 ### 2. 환경 변수 설정
 ```bash
-cp .env.example .env
+cp backend/env.example backend/.env
 # .env 파일을 편집하여 실제 값으로 설정
 ```
 
@@ -77,6 +77,7 @@ cp .env.example .env
 
 ### 4. 애플리케이션 실행
 ```bash
+cd backend
 uvicorn app.main:app --reload
 ```
 

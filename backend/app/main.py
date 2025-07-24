@@ -51,6 +51,26 @@ async def lifespan(app: FastAPI):
 # FastAPI 앱 생성
 app = FastAPI(
     title="Recruitment Platform API",
+    description="""
+채용 플랫폼 백엔드 API 서버입니다.
+
+## 주요 기능
+- 사용자 관리 (회원가입, 로그인, 프로필 관리)
+- 채용공고 관리 및 검색
+- 유사도 분석 및 추천 시스템
+- 스킬 기반 갭 분석
+- AI 챗봇 (LLM + MCP)
+- 스케줄링 및 배치 작업
+
+## 기술 스택
+- FastAPI
+- PostgreSQL + MongoDB
+- SQLAlchemy + Beanie
+- APScheduler
+- Redis Cache
+- OpenAI/OpenRouter
+""",
+    version="1.0.0",
     lifespan=lifespan
 )
 

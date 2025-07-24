@@ -119,28 +119,4 @@ async def get_job_names_with_posts(
     
     return result
 
-@router.delete("/cache/clear", summary="직무명 캐시 초기화", description="직무명 관련 캐시를 모두 초기화합니다.")
-async def clear_job_names_cache():
-    """직무명 캐시를 초기화합니다."""
-    try:
-        # 모든 직무명 관련 캐시 삭제
-        deleted_count = await redis_cache_manager.clear_user_cache(None, ["job_names"])
-        
-        return {
-            "message": "직무명 Redis 캐시가 초기화되었습니다.",
-            "deleted_cache_count": deleted_count
-        }
-        
-    except Exception as e:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"캐시 초기화 실패: {str(e)}")
 
-@router.get("/cache/status", summary="직무명 캐시 상태 조회", description="현재 직무명 캐시 상태를 조회합니다.")
-async def get_job_names_cache_status():
-    """직무명 캐시 상태를 조회합니다."""
-    try:
-        return await redis_cache_manager.get_cache_status(None)
-        
-    except Exception as e:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"캐시 상태 조회 실패: {str(e)}")

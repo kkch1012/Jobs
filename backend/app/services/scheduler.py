@@ -111,10 +111,11 @@ def start_scheduler():
         return
         
     try:
+        from app.config import settings
         # 매일 아침 8시에 통합 배치 작업 실행 (유사도 계산 + 일간 통계 생성)
         scheduler.add_job(
             run_daily_batch_jobs,
-            CronTrigger(hour=8, minute=0),  # 매일 아침 8시
+            CronTrigger(hour=settings.BATCH_SCHEDULE_HOUR, minute=settings.BATCH_SCHEDULE_MINUTE),
             id='daily_batch_jobs',
             name='매일 아침 배치 작업 (유사도 계산 + 일간 통계 생성)',
             replace_existing=True

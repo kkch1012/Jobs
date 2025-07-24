@@ -6,6 +6,7 @@ from app.schemas.user_roadmap import UserRoadmapCreate, UserRoadmapResponse
 from typing import List
 from app.utils.dependencies import get_current_user
 from app.models.user import User
+from app.utils.logger import app_logger
 
 router = APIRouter(prefix="/user_roadmaps", tags=["UserRoadmap"])
 
@@ -36,7 +37,7 @@ def create_user_roadmap(
         ).first()
         
         if existing:
-            print(f"중복 찜 시도: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 이미 찜했습니다.")
+            app_logger.debug(f"중복 찜 시도: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 이미 찜했습니다.")
             raise HTTPException(
                 status_code=400, 
                 detail=f"이미 찜한 로드맵입니다. (로드맵 ID: {roadmap_data.roadmaps_id})"
@@ -56,15 +57,15 @@ def create_user_roadmap(
         db.commit()
         db.refresh(new_roadmap)
         
-        print(f"로드맵 찜 성공: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 찜했습니다.")
+        app_logger.info(f"로드맵 찜 성공: 사용자 {current_user.id}가 로드맵 {roadmap_data.roadmaps_id}를 찜했습니다.")
         return new_roadmap
         
     except HTTPException:
         raise
     except Exception as e:
         import traceback
-        print(f"로드맵 찜 중 오류 발생: {str(e)}")
-        print(f"오류 상세: {traceback.format_exc()}")
+        app_logger.error(f"로드맵 찜 중 오류 발생: {str(e)}")
+        app_logger.error(f"오류 상세: {traceback.format_exc()}")
         db.rollback()
         raise HTTPException(
             status_code=500, 

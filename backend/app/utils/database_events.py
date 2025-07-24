@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from app.models.job_post import JobPost
 from app.services.weekly_stats_service import WeeklyStatsService
 import logging
-import asyncio
 from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -20,15 +19,13 @@ def setup_database_events():
             # 새로운 세션 생성 (이벤트 리스너에서는 기존 세션 사용 불가)
             db = SessionLocal()
             try:
-                # 비동기 함수를 동기적으로 실행
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(
-                        WeeklyStatsService.auto_generate_stats_after_job_post_save(db, target.id)
-                    )
-                finally:
-                    loop.close()
+                # 동기적으로 통계 생성 (비동기 호출 대신)
+                WeeklyStatsService.generate_weekly_stats(db, "tech_stack")
+                WeeklyStatsService.generate_weekly_stats(db, "required_skills")
+                WeeklyStatsService.generate_weekly_stats(db, "preferred_skills")
+                WeeklyStatsService.generate_weekly_stats(db, "main_tasks_skills")
+            except Exception as e:
+                logger.error(f"통계 생성 중 오류: {str(e)}")
             finally:
                 db.close()
                 
@@ -44,15 +41,13 @@ def setup_database_events():
             # 새로운 세션 생성
             db = SessionLocal()
             try:
-                # 비동기 함수를 동기적으로 실행
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(
-                        WeeklyStatsService.auto_generate_stats_after_job_post_save(db, target.id)
-                    )
-                finally:
-                    loop.close()
+                # 동기적으로 통계 생성 (비동기 호출 대신)
+                WeeklyStatsService.generate_weekly_stats(db, "tech_stack")
+                WeeklyStatsService.generate_weekly_stats(db, "required_skills")
+                WeeklyStatsService.generate_weekly_stats(db, "preferred_skills")
+                WeeklyStatsService.generate_weekly_stats(db, "main_tasks_skills")
+            except Exception as e:
+                logger.error(f"통계 생성 중 오류: {str(e)}")
             finally:
                 db.close()
                 

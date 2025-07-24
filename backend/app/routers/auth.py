@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -7,6 +7,7 @@ from datetime import timedelta
 from app.database import get_db
 from app.models.user import User
 from app.core.security import verify_password, get_password_hash, create_access_token
+from app.utils.exceptions import UnauthorizedException, BadRequestException
 
 router = APIRouter(tags=["auth"])
 
@@ -25,19 +26,19 @@ class TokenResponse(BaseModel):
     description="username과 password를 받아 로그인합니다.",
     response_model=TokenResponse,
 )
-def login_by_id(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login_by_id(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)) -> TokenResponse:
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+        raise UnauthorizedException("아이디 또는 비밀번호가 올바르지 않습니다.")
     if not getattr(user, 'hashed_password', None):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+        raise UnauthorizedException("아이디 또는 비밀번호가 올바르지 않습니다.")
     if not verify_password(form_data.password, getattr(user, 'hashed_password')):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="아이디 또는 비밀번호가 올바르지 않습니다.")
+        raise UnauthorizedException("아이디 또는 비밀번호가 올바르지 않습니다.")
     if getattr(user, 'signup_type', None) != "id":
-        raise HTTPException(status_code=400, detail="아이디 기반 회원이 아닙니다.")
+        raise BadRequestException("아이디 기반 회원이 아닙니다.")
     access_token = create_access_token(
         {"sub": str(user.id)}, 
-        expires_delta=timedelta(days=7)  # 7일로 토큰 만료 시간 설정
+        expires_delta=timedelta(days=1)  # 7일로 토큰 만료 시간 설정
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -53,14 +54,14 @@ class SocialLoginRequest(BaseModel):
     description="소셜 로그인 사용자가 이메일로 로그인합니다. (비밀번호 없이 이메일만 필요)",
     response_model=TokenResponse,
 )
-def social_login(data: SocialLoginRequest, db: Session = Depends(get_db)):
+def social_login(data: SocialLoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     user = db.query(User).filter(User.email == data.email).first()
     if not user:
-        raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
+        raise UnauthorizedException("존재하지 않는 사용자입니다.")
     if getattr(user, 'signup_type', None) != "email":
-        raise HTTPException(status_code=400, detail="소셜 로그인 회원이 아닙니다.")
+        raise BadRequestException("소셜 로그인 회원이 아닙니다.")
     access_token = create_access_token(
         {"sub": str(user.id)}, 
-        expires_delta=timedelta(days=7)  # 7일로 토큰 만료 시간 설정
+        expires_delta=timedelta(days=1)  # 7일로 토큰 만료 시간 설정
     )
     return {"access_token": access_token, "token_type": "bearer"}

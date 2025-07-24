@@ -104,10 +104,13 @@ def compute_all_users_similarity(
 )
 def get_user_similarity_scores(
     user_id: int,
-    limit: int = 20,
+    limit: int = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    from app.config import settings
+    if limit is None:
+        limit = settings.SIMILARITY_LIMIT
     try:
         from app.services.similarity_scores import get_user_similarity_scores as get_scores
         
@@ -142,10 +145,13 @@ def get_user_similarity_scores(
 )
 def get_top_job_ids(
     user_id: int,
-    top_k: int = 30,
+    top_k: int = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    from app.config import settings
+    if top_k is None:
+        top_k = settings.SIMILARITY_TOP_K
     try:
         from app.services.similarity_scores import get_top_job_ids as get_top_ids
         

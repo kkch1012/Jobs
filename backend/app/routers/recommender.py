@@ -166,7 +166,7 @@ async def get_recommended_job_ids(
                 else:
                     raise ValueError("JSON 형식을 찾을 수 없습니다.")
             except Exception as e:
-                print(f"JSON 파싱 실패: {e}")
+                app_logger.error(f"JSON 파싱 실패: {e}")
                 # 파싱 실패 시 상위 5개 ID 반환 (유사도 순)
                 recommended_job_ids = [job.id for job, _ in top_jobs_with_sim[:5]]
         else:
