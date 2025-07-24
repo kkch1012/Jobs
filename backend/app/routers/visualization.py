@@ -242,7 +242,7 @@ def get_weekly_stats_by_field(
 - **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
-    - tech_stack, qualifications, preferences, required_skills, preferred_skills
+    - tech_stack, required_skills, preferred_skills, main_tasks_skills
 - `start_week`, `end_week`, `year` 파라미터로 조회할 주차 범위를 지정할 수 있습니다.
 - 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
 - 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.
@@ -262,8 +262,7 @@ def weekly_skill_frequency(
     field: str = Query(
         "tech_stack",
         enum=[
-            "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills"
+            "tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
@@ -311,7 +310,7 @@ def weekly_skill_frequency(
 - **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
-    - tech_stack, qualifications, preferences, required_skills, preferred_skills
+    - tech_stack, required_skills, preferred_skills, main_tasks_skills
 - **현재 주차만** 조회하여 실시간 트렌드를 파악할 수 있습니다.
 - 반환 데이터는 [연도, 주차, 스킬, 빈도] 형태의 리스트입니다.
 
@@ -330,8 +329,7 @@ def weekly_skill_frequency_current(
     field: str = Query(
         "tech_stack",
         enum=[
-            "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills"
+            "tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
@@ -374,7 +372,7 @@ def weekly_skill_frequency_current(
 - **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
-    - tech_stack, qualifications, preferences, required_skills, preferred_skills
+    - tech_stack, required_skills, preferred_skills, main_tasks_skills
 - `week1`, `week2`, `year` 파라미터로 비교할 2개 주차를 지정할 수 있습니다.
 - 반환 데이터는 전체 스킬 목록과 함께 다음 4개 필터링된 결과를 포함합니다:
     - **biggest_difference**: 절대값 차이가 가장 큰 스킬
@@ -401,8 +399,7 @@ def weekly_skill_frequency_comparison(
     field: str = Query(
         "tech_stack",
         enum=[
-            "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills"
+            "tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
@@ -505,8 +502,7 @@ async def resume_vs_job_skill_trend(
     field: str = Query(
         "tech_stack",
         enum=[
-            "tech_stack", "qualifications", "preferences",
-            "required_skills", "preferred_skills"
+            "tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"
         ],
         description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
     ),
