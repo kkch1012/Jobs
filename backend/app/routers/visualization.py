@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.job_required_skill import JobRequiredSkill
 from app.models.job_post import JobPost
 from app.models.user_skill import UserSkill
-from app.schemas.visualization import WeeklySkillStat, ResumeSkillComparison
+from app.schemas.visualization import WeeklySkillStat, DailySkillStatWithRank, ResumeSkillComparison
 from app.utils.dependencies import get_current_user
 from app.models.user import User
 from app.services.gap_model import perform_gap_analysis_visualization
@@ -353,6 +353,88 @@ def weekly_skill_frequency_current(
                     date=current_date.date(),
                     skill=skill_data["skill_name"],
                     count=skill_data["frequency"]
+                ))
+        
+        return response
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"통계 조회 실패: {str(e)}")
+
+@router.get(
+    "/daily_skill_frequency",
+    operation_id="daily_skill_frequency",
+    summary="직무별 일간 스킬 빈도 조회 (일차 범위 + 순위 범위 지정)",
+    description="""
+선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 지정된 날짜 범위의 채용공고에서 추출된 **기술/키워드의 일별 등장 빈도**를 집계하여 반환합니다.
+
+- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
+- 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
+    - tech_stack, required_skills, preferred_skills, main_tasks_skills
+- `start_date`, `end_date` 파라미터로 조회할 날짜 범위를 지정할 수 있습니다 (YYYY-MM-DD 형식).
+- `rank_start`, `rank_end` 파라미터로 조회할 순위 범위를 지정할 수 있습니다 (예: 5, 8 → 5위~8위).
+- 순위는 각 날짜별로 count 기준 내림차순으로 계산됩니다.
+- **응답에 순위 정보(`rank`)가 포함됩니다** - 프론트엔드 시각화에 활용 가능합니다.
+- 반환 데이터는 [날짜, 스킬, 빈도, 순위] 형태의 리스트입니다.
+- 워드클라우드, 트렌드 차트, 통계 등에 활용 가능합니다.
+
+**응답 예시:**
+```json
+[
+  { "date": "2025-07-23", "skill": "Java", "count": 8, "rank": 1 },
+  { "date": "2025-07-23", "skill": "React", "count": 6, "rank": 2 },
+  { "date": "2025-07-23", "skill": "Node.js", "count": 4, "rank": 3 },
+  { "date": "2025-07-24", "skill": "Python", "count": 7, "rank": 1 },
+  { "date": "2025-07-24", "skill": "Docker", "count": 5, "rank": 2 },
+  { "date": "2025-07-24", "skill": "Kubernetes", "count": 3, "rank": 3 }
+]
+```
+""",
+    response_model=List[DailySkillStatWithRank]
+)
+def daily_skill_frequency(
+    job_name: str = Query(..., description="조회할 직무명 (예: 백엔드 개발자)"),
+    field: str = Query(
+        "tech_stack",
+        enum=[
+            "tech_stack", "required_skills", "preferred_skills", "main_tasks_skills"
+        ],
+        description="분석 대상 필드명 (채용공고 모델에 존재하는 컬럼 중 선택)"
+    ),
+    start_date: str = Query(..., description="시작 날짜 (YYYY-MM-DD 형식)"),
+    end_date: str = Query(..., description="종료 날짜 (YYYY-MM-DD 형식, start_date보다 크거나 같아야 함)"),
+    rank_start: Optional[int] = Query(None, ge=1, description="시작 순위 (1부터 시작, 예: 5)"),
+    rank_end: Optional[int] = Query(None, ge=1, description="종료 순위 (rank_start보다 크거나 같아야 함, 예: 8)"),
+    db: Session = Depends(get_db)
+):
+    try:
+        # 순위 범위 검증
+        if rank_start is not None and rank_end is not None:
+            if rank_start > rank_end:
+                raise HTTPException(status_code=400, detail="rank_start는 rank_end보다 작거나 같아야 합니다.")
+        
+        # StatisticsService 사용
+        result = StatisticsService.get_daily_skill_frequency_range(
+            job_name, start_date, end_date, field, db, rank_start, rank_end
+        )
+        
+        # 응답 형식 변환
+        response = []
+        for date_data in result:
+            date_str = date_data["date"]
+            for skill_data in date_data["skills"]:
+                # 날짜 문자열을 date 객체로 변환
+                from datetime import datetime
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+                
+                response.append(DailySkillStatWithRank(
+                    week=date_obj.isocalendar()[1],  # 해당 날짜의 주차
+                    date=date_obj,
+                    skill=skill_data["skill_name"],
+                    count=skill_data["frequency"],
+                    rank=skill_data.get("rank")  # 순위 정보 추가
                 ))
         
         return response

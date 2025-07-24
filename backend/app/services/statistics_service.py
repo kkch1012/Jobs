@@ -123,6 +123,72 @@ class StatisticsService:
         except Exception as e:
             logger.error(f"현재 주차 스킬 빈도 조회 실패: {str(e)}")
             raise
+
+    @staticmethod
+    def get_daily_skill_frequency_range(
+        job_name: str, 
+        start_date: str, 
+        end_date: str, 
+        field: str,
+        db: Session,
+        rank_start: Optional[int] = None,
+        rank_end: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """특정 날짜 범위의 일간 스킬 빈도를 조회합니다."""
+        try:
+            job_role_id = StatisticsService.get_job_role_id(job_name, db)
+            
+            # 날짜 파싱
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+            
+            stats = db.query(WeeklySkillStat).filter(
+                and_(
+                    WeeklySkillStat.job_role_id == job_role_id,
+                    WeeklySkillStat.field_type == field,
+                    WeeklySkillStat.date >= start_dt,
+                    WeeklySkillStat.date <= end_dt
+                )
+            ).all()
+            
+            # 날짜별로 그룹화
+            daily_data = defaultdict(list)
+            for stat in stats:
+                daily_data[stat.date.isoformat()].append({
+                    "skill_name": stat.skill,
+                    "frequency": stat.count
+                })
+            
+            # 순위 범위가 지정된 경우 처리
+            if rank_start is not None and rank_end is not None:
+                # 각 날짜별로 count 기준 내림차순 정렬 후 순위 범위 필터링
+                filtered_daily_data = {}
+                for date, skills in daily_data.items():
+                    # count 기준 내림차순 정렬
+                    sorted_skills = sorted(skills, key=lambda x: x["frequency"], reverse=True)
+                    
+                    # 순위 범위 필터링 (1부터 시작하는 인덱스)
+                    rank_start_idx = rank_start - 1  # 0부터 시작하는 인덱스로 변환
+                    rank_end_idx = rank_end
+                    
+                    if rank_start_idx < len(sorted_skills):
+                        filtered_skills = sorted_skills[rank_start_idx:rank_end_idx]
+                        if filtered_skills:  # 필터링된 결과가 있는 경우만 추가
+                            filtered_daily_data[date] = filtered_skills
+                
+                daily_data = filtered_daily_data
+            
+            return [
+                {
+                    "date": date,
+                    "skills": skills
+                }
+                for date, skills in sorted(daily_data.items())
+            ]
+            
+        except Exception as e:
+            logger.error(f"일간 스킬 빈도 조회 실패: {str(e)}")
+            raise
     
     @staticmethod
     def search_skills_by_keyword(keyword: str, db: Session) -> List[Dict[str, Any]]:
