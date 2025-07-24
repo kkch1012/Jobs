@@ -8,7 +8,7 @@ motor_client = AsyncIOMotorClient(settings.MONGO_URI)
 async def init_mongo():
     await init_beanie(
         database=motor_client[settings.MONGO_DB_NAME],
-        document_models=[MCPMessage],  # JobPosting 제거
+        document_models=[MCPMessage],
     )
 
 async def close_mongo():
