@@ -135,7 +135,7 @@ def get_unique_company_names(db: Session = Depends(get_db)):
     "/unique_applicant_types",
     response_model=List[str],
     summary="지원자격 유니크 리스트 조회",
-    description="등록된 모든 채용공고의 지원자격(중복제거) 리스트를 반환합니다."
+    description="등록된 모든 채용공고의 지원자격을 카테고리별로 정리하여 반환합니다."
 )
 def get_unique_applicant_types(db: Session = Depends(get_db)):
     try:
@@ -145,8 +145,52 @@ def get_unique_applicant_types(db: Session = Depends(get_db)):
                 or_(JobPost.is_expired.is_(None), JobPost.is_expired.is_(False))
             )
         ).all()
-        result = [t[0] for t in types if t[0]]
-        app_logger.info(f"지원자격 유니크 리스트 조회 완료: {len(result)}건")
+        
+        raw_types = [t[0] for t in types if t[0]]
+        
+        # 지원자격 카테고리 정리
+        categorized_types = set()
+        
+        for applicant_type in raw_types:
+            if not applicant_type:
+                continue
+                
+            # 신입 관련
+            if "신입" in applicant_type:
+                if "경력" in applicant_type:
+                    categorized_types.add("신입/경력")
+                else:
+                    categorized_types.add("신입")
+            # 경력 관련
+            elif "경력" in applicant_type:
+                # 경력 연차 범위 추출 (예: "경력(3~5년)" -> 3, 5)
+                import re
+                year_matches = re.findall(r'(\d+)', applicant_type)
+                if year_matches:
+                    # 첫 번째 숫자를 기준으로 분류
+                    min_years = int(year_matches[0])
+                    if min_years == 0:
+                        categorized_types.add("신입/경력")
+                    elif min_years <= 3:
+                        categorized_types.add("경력(1-3년)")
+                    elif min_years <= 5:
+                        categorized_types.add("경력(3-5년)")
+                    elif min_years <= 7:
+                        categorized_types.add("경력(5-7년)")
+                    elif min_years <= 10:
+                        categorized_types.add("경력(7-10년)")
+                    else:
+                        categorized_types.add("경력(10년+)")
+                else:
+                    categorized_types.add("경력")
+            # 기타
+            else:
+                categorized_types.add(applicant_type)
+        
+        # 정렬된 결과 반환
+        result = sorted(list(categorized_types))
+        
+        app_logger.info(f"지원자격 유니크 리스트 조회 완료: {len(result)}건 (카테고리별 정리)")
         return result
     except Exception as e:
         app_logger.error(f"지원자격 유니크 리스트 조회 실패: {str(e)}")

@@ -149,9 +149,12 @@ class MCPClient:
         else:
             return await self.call_tool("job_recommendation", arguments)
     
-    async def get_my_resume(self, auth_token: str) -> Dict[str, Any]:
+    async def get_my_resume(self, auth_token: str, requested_field: Optional[str] = None) -> Dict[str, Any]:
         """내 이력서 정보를 조회합니다."""
-        return await self.call_tool_with_auth("get_my_resume", {}, auth_token)
+        arguments = {}
+        if requested_field:
+            arguments["requested_field"] = requested_field
+        return await self.call_tool_with_auth("get_my_resume", arguments, auth_token)
     
     async def update_resume(self, resume_data: Dict[str, Any], auth_token: str) -> Dict[str, Any]:
         """이력서 정보를 업데이트합니다."""

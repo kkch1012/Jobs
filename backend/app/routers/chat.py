@@ -124,6 +124,48 @@ def extract_parameters_from_message(message: str, api_type: str) -> Dict[str, An
     
     return parameters
 
+def extract_requested_resume_field(message: str) -> Optional[str]:
+    """사용자 메시지에서 요청한 이력서 필드를 추출합니다."""
+    message_lower = message.lower()
+    
+    # 대학교/학교 관련
+    if any(word in message_lower for word in ["대학교", "대학", "학교", "university", "college"]):
+        return "university"
+    
+    # 전공 관련
+    if any(word in message_lower for word in ["전공", "학과", "major", "학부"]):
+        return "major"
+    
+    # 학점 관련
+    if any(word in message_lower for word in ["학점", "gpa", "성적", "평점"]):
+        return "gpa"
+    
+    # 어학점수 관련
+    if any(word in message_lower for word in ["어학", "토익", "toeic", "토플", "toefl", "아이엘츠", "ielts"]):
+        return "language_score"
+    
+    # 경력 관련
+    if any(word in message_lower for word in ["경력", "연차", "working_year", "경험"]):
+        return "working_year"
+    
+    # 희망직무 관련
+    if any(word in message_lower for word in ["희망직무", "직무", "job_name", "원하는 일"]):
+        return "job_name"
+    
+    # 기술스택 관련
+    if any(word in message_lower for word in ["기술", "스택", "tech_stack", "스킬"]):
+        return "tech_stack"
+    
+    # 자격증 관련
+    if any(word in message_lower for word in ["자격증", "certificate", "증명서"]):
+        return "certificates"
+    
+    # 전체 이력서 요청인 경우
+    if any(word in message_lower for word in ["전체", "모든", "이력서", "resume", "전부"]):
+        return "all"
+    
+    return None
+
 async def save_message_to_mongo(session_id: int, role: str, content: str):
     """MongoDB에 메시지를 저장합니다."""
     try:
@@ -241,12 +283,24 @@ async def chat_with_llm(
                 return create_error_response(data.session_id, error_content, 401)
             
             try:
+                # get_my_resume의 경우 특정 필드 요청 처리
+                if intent == "get_my_resume":
+                    # 사용자 메시지에서 요청한 필드 추출
+                    requested_field = extract_requested_resume_field(data.message)
+                    if requested_field:
+                        parameters["requested_field"] = requested_field
+                        app_logger.debug(f"이력서 특정 필드 요청: {requested_field}")
+                
                 # job_recommendation의 경우 파라미터 병합
                 if intent == "job_recommendation":
                     parameters = merge_parameters_with_defaults(parameters, intent)
                 
                 # auth_header는 위에서 None 체크를 했으므로 str 타입임이 보장됨
-                mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
+                if intent == "get_my_resume":
+                    requested_field = parameters.get("requested_field")
+                    mcp_result = await mcp_client.get_my_resume(auth_header, requested_field)
+                else:
+                    mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
             except Exception as e:
                 app_logger.error(f"인증 도구 호출 실패: {str(e)}")
                 error_content = f"인증 도구 호출 실패: {str(e)}"
