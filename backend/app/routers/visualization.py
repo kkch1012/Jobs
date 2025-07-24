@@ -879,3 +879,65 @@ async def get_roadmap_recommendations_direct(
         import traceback
         error_detail = f"로드맵 추천 중 오류가 발생했습니다: {str(e)}\n\n상세 정보:\n{traceback.format_exc()}"
         raise HTTPException(status_code=500, detail=error_detail)
+
+@router.get(
+    "/stats/available_dates",
+    summary="통계 데이터에서 사용 가능한 날짜/연도/주차 조회",
+    description="""
+weekly_skill_stats 테이블에서 사용 가능한 날짜, 연도, 주차의 유니크값들을 조회합니다.
+
+- **dates**: 사용 가능한 모든 날짜 (YYYY-MM-DD 형식)
+- **years**: 사용 가능한 모든 연도
+- **weeks**: 사용 가능한 모든 주차 (1-53)
+
+이 엔드포인트는 프론트엔드에서 날짜/주차 선택 UI를 구성할 때 활용할 수 있습니다.
+
+**응답 예시:**
+```json
+{
+  "dates": ["2025-07-23", "2025-07-24"],
+  "years": [2025],
+  "weeks": [30]
+}
+```
+""",
+    response_model=Dict[str, Any]
+)
+def get_available_stats_dates(db: Session = Depends(get_db)):
+    """
+    통계 데이터에서 사용 가능한 날짜, 연도, 주차의 유니크값들을 조회합니다.
+    """
+    try:
+        from sqlalchemy import func, distinct
+        from app.models.job_required_skill import JobRequiredSkill
+        
+        # 1. 사용 가능한 날짜들 조회
+        dates_query = db.query(
+            distinct(WeeklySkillStatModel.date)
+        ).order_by(WeeklySkillStatModel.date)
+        dates = [row[0].isoformat() for row in dates_query.all()]
+        
+        # 2. 사용 가능한 연도들 조회
+        years_query = db.query(
+            distinct(func.extract('year', WeeklySkillStatModel.date))
+        ).order_by(func.extract('year', WeeklySkillStatModel.date))
+        years = [int(row[0]) for row in years_query.all()]
+        
+        # 3. 사용 가능한 주차들 조회
+        weeks_query = db.query(
+            distinct(WeeklySkillStatModel.week)
+        ).order_by(WeeklySkillStatModel.week)
+        weeks = [int(row[0]) for row in weeks_query.all()]
+        
+        return {
+            "dates": dates,
+            "years": years,
+            "weeks": weeks
+        }
+        
+    except Exception as e:
+        logger.error(f"사용 가능한 통계 날짜 조회 실패: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"통계 날짜 조회 중 오류가 발생했습니다: {str(e)}"
+        )

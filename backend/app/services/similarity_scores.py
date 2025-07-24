@@ -151,17 +151,18 @@ def should_recompute_similarity(user: User, db: Session, max_age_hours: int = 24
             similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 없습니다. 재계산이 필요합니다.")
             return True
         
-        # 마지막 계산 시간 확인 (timezone-aware datetime 사용)
+        # 마지막 계산 날짜와 현재 날짜 비교 (날짜 기준)
         from datetime import timezone
         current_time = datetime.now(timezone.utc)
-        time_diff = current_time - latest_similarity.created_at
-        hours_diff = time_diff.total_seconds() / 3600
+        latest_date = latest_similarity.created_at.date()
+        current_date = current_time.date()
         
-        if hours_diff > max_age_hours:
-            similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 {hours_diff:.1f}시간 전에 계산되었습니다. 재계산이 필요합니다.")
+        # 날짜가 다르면 재계산 필요
+        if latest_date != current_date:
+            similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 {latest_date}에 계산되었습니다. 오늘({current_date}) 재계산이 필요합니다.")
             return True
         
-        similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 최신입니다. 재계산이 필요하지 않습니다.")
+        similarity_logger.info(f"사용자 {user.id}의 유사도 점수가 오늘({current_date}) 이미 계산되었습니다. 재계산이 필요하지 않습니다.")
         return False
     except Exception as e:
         # created_at 필드가 아직 없는 경우 등 에러 발생 시 항상 재계산

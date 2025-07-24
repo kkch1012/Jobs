@@ -136,12 +136,14 @@ AVAILABLE_TOOLS = {
         description="내 이력서 정보를 조회합니다",
         inputSchema={
             "type": "object",
-            "properties": {}
+            "properties": {
+                "requested_field": {"type": "string", "description": "요청한 특정 필드 (university, major, gpa, language_score, working_year, job_name, tech_stack, certificates, all)", "default": "all"}
+            }
         },
         outputSchema={
             "type": "object",
             "properties": {
-                "resume": {"type": "object", "description": "이력서 정보"}
+                "resume": {"type": "object", "description": "이력서 정보 (특정 필드 또는 전체)"}
             }
         }
     ),
@@ -515,12 +517,55 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                     resume_data,
                     headers=headers
                 )
+        
+        elif tool_name == "get_my_resume":
+            # get_my_resume의 경우 requested_field 파라미터 처리
+            arguments = request.arguments
+            requested_field = arguments.get("requested_field", "all")
+            
+            try:
+                # 전체 이력서 조회
+                full_resume = await fastapi_client.call_api(endpoint, headers=headers)
+                
+                # requested_field에 따라 특정 필드만 반환
+                if requested_field == "all":
+                    # 전체 이력서 반환
+                    result = {"resume": full_resume}
+                else:
+                    # 특정 필드만 추출
+                    filtered_resume = {}
+                    
+                    if requested_field == "university":
+                        filtered_resume["university"] = full_resume.get("university")
+                    elif requested_field == "major":
+                        filtered_resume["major"] = full_resume.get("major")
+                    elif requested_field == "gpa":
+                        filtered_resume["gpa"] = full_resume.get("gpa")
+                    elif requested_field == "language_score":
+                        filtered_resume["language_score"] = full_resume.get("language_score")
+                    elif requested_field == "working_year":
+                        filtered_resume["working_year"] = full_resume.get("working_year")
+                    elif requested_field == "job_name":
+                        filtered_resume["desired_job"] = full_resume.get("desired_job")
+                    elif requested_field == "tech_stack":
+                        filtered_resume["skills"] = full_resume.get("skills")
+                    elif requested_field == "certificates":
+                        filtered_resume["certificates"] = full_resume.get("certificates")
+                    else:
+                        # 알 수 없는 필드인 경우 전체 반환
+                        filtered_resume = full_resume
+                    
+                    result = {"resume": filtered_resume}
+                
                 return ToolCallResponse(content=[
                     {
                         "type": "text",
                         "text": json.dumps(result, ensure_ascii=False)
                     }
                 ])
+                
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"이력서 조회 실패: {str(e)}")
         elif tool_name == "visualization":
             # visualization 도구는 job_name과 field 파라미터가 필요
             arguments = request.arguments
