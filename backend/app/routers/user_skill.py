@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -7,6 +7,7 @@ from app.schemas.user_skill import UserSkillCreate, UserSkillResponse
 from app.utils.dependencies import get_current_user
 from app.models.user import User
 from app.models.skill import Skill
+from app.utils.logger import app_logger
 
 router = APIRouter(prefix="/users/me/skills", tags=["UserSkill"])
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user_preference import UserPreference
@@ -55,7 +55,7 @@ def add_preference(
     )
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=400,
             detail="이미 찜한 공고입니다."
         )
 
@@ -90,7 +90,7 @@ def remove_preference(
     )
     if not pref:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=404,
             detail="찜한 공고가 없습니다."
         )
     db.delete(pref)

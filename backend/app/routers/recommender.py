@@ -10,10 +10,10 @@ from app.utils.redis_cache import redis_cache_manager
 import os
 import re
 import json
-import logging
 from datetime import timedelta, datetime
+from app.utils.logger import app_logger
 
-logger = logging.getLogger(__name__)
+logger = app_logger
 
 router = APIRouter(prefix="/recommend", tags=["Recommend"])
 

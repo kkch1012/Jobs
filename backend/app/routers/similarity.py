@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
-from app.models.user_similarity import UserSimilarity
 from app.models.job_post import JobPost
 from app.services.similarity_scores import (
     compute_similarity_scores,
@@ -11,8 +10,6 @@ from app.services.similarity_scores import (
     auto_compute_all_users_similarity
 )
 from app.utils.dependencies import get_current_user
-from typing import List, Dict, Any
-import numpy as np
 
 router = APIRouter(prefix="/similarity", tags=["Similarity"])
 
