@@ -29,7 +29,6 @@ class User(Base):
     language_score = Column(JSON, nullable=True, default=dict)        # 어학 점수 (JSON, ex: {"TOEIC": 500})
     desired_job = Column(JSON, nullable=True, default=list)           # 희망 직무 (JSON array, ex: ["프론트엔드 개발자", "서버 개발자"])
     working_year = Column(String, nullable=False, default="신입")      # 연차 ("신입" or "경력 N년차")
-    todo_list = Column(JSON, nullable=True, default=list)             # 투두리스트 (JSON list)
 
     # Relationships to other tables (one-to-many)
     experiences = relationship("UserExperience", back_populates="user", cascade="all, delete-orphan")
@@ -39,3 +38,4 @@ class User(Base):
     user_roadmaps = relationship("UserRoadmap", back_populates="user", cascade="all, delete-orphan")
     chat_sessions = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
     user_similarities = relationship("UserSimilarity", back_populates="user", cascade="all, delete-orphan")
+    todo_lists = relationship("TodoList", back_populates="user", cascade="all, delete-orphan")

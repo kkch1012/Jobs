@@ -353,9 +353,15 @@ async def chat_with_llm(
         return create_error_response(data.session_id, error_content)
 
 @router.get("/history", summary="세션별 채팅 이력 조회", description="특정 세션 ID의 모든 채팅 메시지(유저/AI)를 시간순으로 반환합니다.")
-async def get_chat_history(session_id: int):
+async def get_chat_history(session_id: str):
     try:
-        messages = await MCPMessage.find({"session_id": session_id}).sort("created_at").to_list()
+        # session_id를 정수로 변환
+        try:
+            session_id_int = int(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="session_id는 정수여야 합니다.")
+        
+        messages = await MCPMessage.find({"session_id": session_id_int}).sort("created_at").to_list()
         return [
             {
                 "role": msg.role,
@@ -364,5 +370,8 @@ async def get_chat_history(session_id: int):
             }
             for msg in messages
         ]
+    except HTTPException:
+        raise
     except Exception as e:
+        app_logger.error(f"채팅 이력 조회 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"채팅 이력 조회 실패: {str(e)}")

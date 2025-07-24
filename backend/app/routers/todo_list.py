@@ -1,24 +1,31 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, desc, asc
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 from app.database import get_db
+from app.models.todo_list import TodoList
 from app.models.user import User
 from app.models.user_roadmap import UserRoadmap
 from app.models.roadmap import Roadmap
 from app.models.job_post import JobPost
 from app.models.user_preference import UserPreference
+from app.schemas.todo_list import (
+    TodoListCreate, 
+    TodoListUpdate, 
+    TodoListResponse, 
+    TodoListListResponse
+)
+from app.utils.dependencies import get_current_user
+from app.utils.logger import app_logger
 from app.services.llm_client import llm_client
 from app.services.mcp_client import mcp_client
 from app.services.gap_model import perform_gap_analysis_todo
 from app.services.roadmap_model import get_roadmap_recommendations
-from app.utils.dependencies import get_current_user
-from app.utils.exceptions import NotFoundException, BadRequestException, InternalServerException
-from app.utils.logger import app_logger
-from typing import List, Dict, Any, Optional, Union
 from openai.types.chat import ChatCompletionMessageParam
 import json
-from datetime import datetime, timedelta
 
-router = APIRouter(prefix="/todo", tags=["todo"])
+router = APIRouter(prefix="/todo-list", tags=["todo_list"])
 
 async def get_user_favorites(user: User, db: Session) -> Dict[str, Any]:
     """사용자가 찜한 로드맵과 공고 목록 조회"""
@@ -54,7 +61,7 @@ async def get_user_favorites(user: User, db: Session) -> Dict[str, Any]:
                 job_posts.append({
                     "id": job.id,
                     "title": job.title,
-                    "company": job.company_name,  # company_name 필드 사용
+                    "company": job.company_name,
                     "posting_date": job.posting_date,
                     "deadline": job.deadline,
                     "required_skills": job.required_skills
@@ -64,6 +71,7 @@ async def get_user_favorites(user: User, db: Session) -> Dict[str, Any]:
             "roadmaps": roadmap_list,
             "job_posts": job_posts
         }
+        
     except Exception as e:
         app_logger.error(f"찜한 목록 조회 실패: {str(e)}")
         return {"roadmaps": [], "job_posts": []}
@@ -106,7 +114,7 @@ async def generate_schedule_from_favorites(
     # 2. 직무별 상위 10 조회
     user_id = getattr(user, 'id', None)
     if user_id is None:
-        raise BadRequestException("사용자 ID를 찾을 수 없습니다.")
+        raise HTTPException(status_code=400, detail="사용자 ID를 찾을 수 없습니다.")
     top_skills = await get_job_gap_analysis(job_title, user_id, db)
     
     # 3. 갭 분석 결과와 매칭되는 강의들 조회
@@ -167,9 +175,8 @@ async def generate_schedule_from_favorites(
     # 최대 10개로 제한
     final_roadmaps = final_roadmaps[:10]
     
-    #3 LLM을 통한 일정 생성
+    # 6. LLM을 통한 일정 생성
     # 현재 날짜 계산
-    from datetime import datetime, timedelta
     current_date = datetime.now()
     
     prompt = f"""
@@ -201,38 +208,44 @@ async def generate_schedule_from_favorites(
     8. 공고 마감일 전 준비 완료되도록 일정 조정
     9. 날짜는 오늘({current_date.strftime('%Y-%m-%d')})부터 시작하여 {days}일간 설정
     
-출력 형식]
+    출력 형식]
     다음 JSON 형태로 응답해주세요:
     {{
-        job_title: "{job_title}",
-        duration_days: {days},
-        target_skills": {json.dumps(top_skills, ensure_ascii=False)},
-    "schedule":{{
-        day1
-               date": "{current_date.strftime('%Y-%m-%d')}",
-                goals": ["목표1", "목표2"],
-         tasks                   {{
-                      title": "태스크 제목",
-                        description": "상세 설명",
-                      duration": "2시간",
-                       type": "roadmap|skill_study|job_prep|review|project",
-                        related_roadmap": "로드맵명 또는 null",
-                        related_job": "공고명 또는 null"
+        "job_title": "{job_title}",
+        "duration_days": {days},
+        "target_skills": {json.dumps(top_skills, ensure_ascii=False)},
+        "schedule": [
+            {{
+                "day": 1,
+                "date": "{current_date.strftime('%Y-%m-%d')}",
+                "goals": ["목표1", "목표2"],
+                "tasks": [
+                    {{
+                        "title": "태스크 제목",
+                        "description": "상세 설명",
+                        "duration": "2시간",
+                        "type": "roadmap|skill_study|job_prep|review|project",
+                        "related_roadmap": "로드맵명 또는 null",
+                        "related_job": "공고명 또는 null"
                     }}
                 ],
-                notes: "항이나 팁"
+                "notes": "항이나 팁"
             }}
         ],
-        roadmap_deadlines:{{
-                roadmap_name": "로드맵명",
-                deadline": "2025-01-15",
-                days_remaining": 15        }}
+        "roadmap_deadlines": [
+            {{
+                "roadmap_name": "로드맵명",
+                "deadline": "2025-01-15",
+                "days_remaining": 15
+            }}
         ],
-      job_deadlines:{{
-               job_title": "공고명",
-                company": "회사명",
-                deadline": "2025-01-20",
-                days_remaining": 20        }}
+        "job_deadlines": [
+            {{
+                "job_title": "공고명",
+                "company": "회사명",
+                "deadline": "2025-01-20",
+                "days_remaining": 20
+            }}
         ]
     }}
     """
@@ -248,7 +261,7 @@ async def generate_schedule_from_favorites(
     response = await llm_client.chat_completion(messages)
     
     if not response:
-        raise BadRequestException("LLM 응답을 받지 못했습니다.")
+        raise HTTPException(status_code=400, detail="LLM 응답을 받지 못했습니다.")
     
     # JSON 파싱
     try:
@@ -276,7 +289,6 @@ def create_fallback_schedule(
     """LLM 응답 실패 시 기본 일정 생성"""
     
     # 현재 날짜부터 시작
-    from datetime import datetime, timedelta
     start_date = datetime.now()
     
     schedule = []
@@ -361,7 +373,7 @@ def create_fallback_schedule(
             days_remaining = (deadline - datetime.now()).days
             job_deadlines.append({
                 "job_title": job['title'],
-                "company": job['company'],  # get_user_favorites에서 이미 company_name으로 설정됨
+                "company": job['company'],
                 "deadline": deadline.strftime("%Y-%m-%d"),
                 "days_remaining": max(0, days_remaining)
             })
@@ -374,6 +386,309 @@ def create_fallback_schedule(
         "roadmap_deadlines": roadmap_deadlines,
         "job_deadlines": job_deadlines
     }
+
+@router.post("/", response_model=TodoListResponse, summary="할 일 생성")
+def create_todo(
+    todo: TodoListCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """새로운 할 일을 생성합니다."""
+    try:
+        db_todo = TodoList(
+            user_id=current_user.id,
+            title=todo.title,
+            description=todo.description,
+            is_completed=todo.is_completed,
+            priority=todo.priority,
+            due_date=todo.due_date,
+            category=todo.category
+        )
+        db.add(db_todo)
+        db.commit()
+        db.refresh(db_todo)
+        
+        app_logger.info(f"할 일 생성 완료: 사용자 {current_user.id}, 할 일 ID {db_todo.id}")
+        return db_todo
+        
+    except Exception as e:
+        app_logger.error(f"할 일 생성 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 생성 중 오류가 발생했습니다: {str(e)}")
+
+@router.get("/", response_model=TodoListListResponse, summary="할 일 목록 조회")
+def get_todos(
+    is_completed: Optional[bool] = Query(None, description="완료 여부로 필터링"),
+    priority: Optional[str] = Query(None, description="우선순위로 필터링 (low, medium, high)"),
+    category: Optional[str] = Query(None, description="카테고리로 필터링"),
+    due_date_from: Optional[datetime] = Query(None, description="마감일 시작 (YYYY-MM-DD)"),
+    due_date_to: Optional[datetime] = Query(None, description="마감일 종료 (YYYY-MM-DD)"),
+    sort_by: str = Query("created_at", description="정렬 기준 (created_at, due_date, priority, title)"),
+    sort_order: str = Query("desc", description="정렬 순서 (asc, desc)"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """사용자의 할 일 목록을 조회합니다. 다양한 필터링과 정렬 옵션을 지원합니다."""
+    try:
+        # 기본 쿼리
+        query = db.query(TodoList).filter(TodoList.user_id == current_user.id)
+        
+        # 필터링
+        if is_completed is not None:
+            query = query.filter(TodoList.is_completed == is_completed)
+        
+        if priority:
+            query = query.filter(TodoList.priority == priority)
+        
+        if category:
+            query = query.filter(TodoList.category == category)
+        
+        if due_date_from:
+            query = query.filter(TodoList.due_date >= due_date_from)
+        
+        if due_date_to:
+            query = query.filter(TodoList.due_date <= due_date_to)
+        
+        # 정렬
+        if sort_by == "due_date":
+            order_column = TodoList.due_date
+        elif sort_by == "priority":
+            order_column = TodoList.priority
+        elif sort_by == "title":
+            order_column = TodoList.title
+        else:
+            order_column = TodoList.created_at
+        
+        if sort_order == "asc":
+            query = query.order_by(asc(order_column))
+        else:
+            query = query.order_by(desc(order_column))
+        
+        todos = query.all()
+        
+        # 통계 계산
+        total_count = len(todos)
+        completed_count = sum(1 for todo in todos if todo.is_completed)
+        pending_count = total_count - completed_count
+        
+        app_logger.info(f"할 일 목록 조회 완료: 사용자 {current_user.id}, 총 {total_count}개")
+        
+        return TodoListListResponse(
+            todo_lists=todos,
+            total_count=total_count,
+            completed_count=completed_count,
+            pending_count=pending_count
+        )
+        
+    except Exception as e:
+        app_logger.error(f"할 일 목록 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 목록 조회 중 오류가 발생했습니다: {str(e)}")
+
+@router.get("/{todo_id}", response_model=TodoListResponse, summary="할 일 상세 조회")
+def get_todo(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """특정 할 일의 상세 정보를 조회합니다."""
+    try:
+        todo = db.query(TodoList).filter(
+            and_(
+                TodoList.id == todo_id,
+                TodoList.user_id == current_user.id
+            )
+        ).first()
+        
+        if not todo:
+            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+        
+        return todo
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"할 일 상세 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 상세 조회 중 오류가 발생했습니다: {str(e)}")
+
+@router.put("/{todo_id}", response_model=TodoListResponse, summary="할 일 수정")
+def update_todo(
+    todo_id: int,
+    todo_update: TodoListUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """할 일을 수정합니다."""
+    try:
+        todo = db.query(TodoList).filter(
+            and_(
+                TodoList.id == todo_id,
+                TodoList.user_id == current_user.id
+            )
+        ).first()
+        
+        if not todo:
+            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+        
+        # 업데이트할 필드만 수정
+        update_data = todo_update.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(todo, field, value)
+        
+        todo.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(todo)
+        
+        app_logger.info(f"할 일 수정 완료: 사용자 {current_user.id}, 할 일 ID {todo_id}")
+        return todo
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"할 일 수정 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 수정 중 오류가 발생했습니다: {str(e)}")
+
+@router.delete("/{todo_id}", summary="할 일 삭제")
+def delete_todo(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """할 일을 삭제합니다."""
+    try:
+        todo = db.query(TodoList).filter(
+            and_(
+                TodoList.id == todo_id,
+                TodoList.user_id == current_user.id
+            )
+        ).first()
+        
+        if not todo:
+            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+        
+        db.delete(todo)
+        db.commit()
+        
+        app_logger.info(f"할 일 삭제 완료: 사용자 {current_user.id}, 할 일 ID {todo_id}")
+        return {"message": "할 일이 삭제되었습니다."}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"할 일 삭제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 삭제 중 오류가 발생했습니다: {str(e)}")
+
+@router.patch("/{todo_id}/toggle", response_model=TodoListResponse, summary="할 일 완료 상태 토글")
+def toggle_todo_completion(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """할 일의 완료 상태를 토글합니다."""
+    try:
+        todo = db.query(TodoList).filter(
+            and_(
+                TodoList.id == todo_id,
+                TodoList.user_id == current_user.id
+            )
+        ).first()
+        
+        if not todo:
+            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+        
+        todo.is_completed = not todo.is_completed
+        todo.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(todo)
+        
+        status = "완료" if todo.is_completed else "미완료"
+        app_logger.info(f"할 일 상태 변경: 사용자 {current_user.id}, 할 일 ID {todo_id}, 상태 {status}")
+        return todo
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"할 일 상태 변경 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 상태 변경 중 오류가 발생했습니다: {str(e)}")
+
+@router.get("/stats/summary", summary="할 일 통계 요약")
+def get_todo_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """할 일 통계 정보를 조회합니다."""
+    try:
+        # 전체 할 일 수
+        total_todos = db.query(TodoList).filter(TodoList.user_id == current_user.id).count()
+        
+        # 완료된 할 일 수
+        completed_todos = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.is_completed == True
+            )
+        ).count()
+        
+        # 오늘 마감인 할 일 수
+        today = datetime.utcnow().date()
+        today_todos = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.due_date >= today,
+                TodoList.due_date < today + timedelta(days=1),
+                TodoList.is_completed == False
+            )
+        ).count()
+        
+        # 지연된 할 일 수
+        overdue_todos = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.due_date < today,
+                TodoList.is_completed == False
+            )
+        ).count()
+        
+        # 우선순위별 통계
+        high_priority = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.priority == "high",
+                TodoList.is_completed == False
+            )
+        ).count()
+        
+        medium_priority = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.priority == "medium",
+                TodoList.is_completed == False
+            )
+        ).count()
+        
+        low_priority = db.query(TodoList).filter(
+            and_(
+                TodoList.user_id == current_user.id,
+                TodoList.priority == "low",
+                TodoList.is_completed == False
+            )
+        ).count()
+        
+        return {
+            "total_todos": total_todos,
+            "completed_todos": completed_todos,
+            "pending_todos": total_todos - completed_todos,
+            "completion_rate": round((completed_todos / total_todos * 100) if total_todos > 0 else 0, 2),
+            "today_due": today_todos,
+            "overdue": overdue_todos,
+            "priority_stats": {
+                "high": high_priority,
+                "medium": medium_priority,
+                "low": low_priority
+            }
+        }
+        
+    except Exception as e:
+        app_logger.error(f"할 일 통계 조회 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 통계 조회 중 오류가 발생했습니다: {str(e)}")
 
 @router.post("/generate", summary="찜한 로드맵/공고 기반 일정 생성")
 async def generate_todo_list(
@@ -403,122 +718,68 @@ async def generate_todo_list(
         # 일정 생성
         schedule_data = await generate_schedule_from_favorites(current_user, job_title, days, db)
         
-        # 기존 todo_list 확인
-        existing_todo = getattr(current_user, 'todo_list', None)
-        if existing_todo:
-            app_logger.info(f"사용자 {current_user.id}의 기존 todo-list를 새로운 일정으로 덮어씁니다.")
+        # 기존 todo_list 확인 및 삭제
+        existing_todos = db.query(TodoList).filter(TodoList.user_id == current_user.id).all()
+        if existing_todos:
+            app_logger.info(f"사용자 {current_user.id}의 기존 todo-list {len(existing_todos)}개를 삭제합니다.")
+            for todo in existing_todos:
+                db.delete(todo)
         
-        # 사용자 모델에 todo_list 저장 (JSON 형태로 저장) - 기존 데이터 덮어쓰기
-        setattr(current_user, 'todo_list', schedule_data)
+        # 새로운 일정을 TodoList 테이블에 저장
+        created_todos = []
+        for day_schedule in schedule_data.get("schedule", []):
+            for task in day_schedule.get("tasks", []):
+                # 마감일 계산 (일정의 날짜 + 1일)
+                try:
+                    task_date = datetime.strptime(day_schedule["date"], "%Y-%m-%d")
+                    due_date = task_date + timedelta(days=1)
+                except:
+                    due_date = datetime.now() + timedelta(days=1)
+                
+                # 우선순위 결정
+                priority = "medium"
+                if task.get("type") == "job_prep":
+                    priority = "high"
+                elif task.get("type") == "review":
+                    priority = "low"
+                
+                # 카테고리 결정
+                category = task.get("type", "일반")
+                if task.get("type") == "roadmap":
+                    category = "로드맵 학습"
+                elif task.get("type") == "skill_study":
+                    category = "스킬 학습"
+                elif task.get("type") == "job_prep":
+                    category = "취업 준비"
+                elif task.get("type") == "review":
+                    category = "복습"
+                elif task.get("type") == "project":
+                    category = "프로젝트"
+                
+                # TodoList 생성
+                todo = TodoList(
+                    user_id=current_user.id,
+                    title=task.get("title", "제목 없음"),
+                    description=task.get("description", ""),
+                    is_completed=False,
+                    priority=priority,
+                    due_date=due_date,
+                    category=category
+                )
+                db.add(todo)
+                created_todos.append(todo)
+        
         db.commit()
         
-        app_logger.info(f"사용자 {current_user.id}의 일정 생성 완료: {job_title}")
+        app_logger.info(f"사용자 {current_user.id}의 일정 생성 완료: {job_title}, {len(created_todos)}개 할 일 생성")
         
         return {
             "success": True,
-            "message": f"{job_title} 직무를 위한 {days}일 학습 일정이 생성되었습니다.",
-            "data": schedule_data
+            "message": f"{job_title} 직무를 위한 {days}일 학습 일정이 생성되었습니다. 총 {len(created_todos)}개의 할 일이 생성되었습니다.",
+            "data": schedule_data,
+            "created_todos_count": len(created_todos)
         }
         
     except Exception as e:
         app_logger.error(f"일정 생성 실패: {str(e)}")
-        raise InternalServerException(f"일정 생성 중 오류가 발생했습니다: {str(e)}")
-
-@router.get("/user", summary="유저의 todo-list 조회")
-def get_user_todo_list(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    현재 로그인한 사용자의 todo-list를 조회합니다.
-    
-    Args:
-        current_user: 현재 로그인한 사용자
-        db: 데이터베이스 세션
-    
-    Returns:
-        사용자의 todo-list
-    """
-    try:
-        todo_list = getattr(current_user, 'todo_list', None)
-        if not todo_list or todo_list == []:
-            return {
-                "success": True,
-                "message": "등록된 todo-list가 없습니다.",
-                "data": None
-            }
-        
-        app_logger.info(f"사용자 {current_user.id}의 todo-list 조회")
-        
-        return {
-            "success": True,
-            "message": "todo-list 조회 성공",
-            "data": todo_list
-        }
-        
-    except Exception as e:
-        app_logger.error(f"todo-list 조회 실패: {str(e)}")
-        raise InternalServerException(f"todo-list 조회 중 오류가 발생했습니다: {str(e)}")
-
-@router.put("/update", summary="todo-list 업데이트")
-def update_user_todo_list(
-    todo_data: Dict[str, Any],
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    사용자의 todo-list를 업데이트합니다.
-    
-    Args:
-        todo_data: 업데이트할 todo-list 데이터
-        current_user: 현재 로그인한 사용자
-        db: 데이터베이스 세션
-    
-    Returns:
-        업데이트 결과
-    """
-    try:
-        setattr(current_user, 'todo_list', todo_data)
-        db.commit()
-        
-        app_logger.info(f"사용자 {current_user.id}의 todo-list 업데이트 완료")
-        
-        return {
-            "success": True,
-            "message": "todo-list가 성공적으로 업데이트되었습니다.",
-            "data": todo_data
-        }
-        
-    except Exception as e:
-        app_logger.error(f"todo-list 업데이트 실패: {str(e)}")
-        raise InternalServerException(f"todo-list 업데이트 중 오류가 발생했습니다: {str(e)}")
-
-@router.delete("/clear", summary="todo-list 삭제")
-def clear_user_todo_list(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    사용자의 todo-list를 삭제합니다.
-    
-    Args:
-        current_user: 현재 로그인한 사용자
-        db: 데이터베이스 세션
-    
-    Returns:
-        삭제 결과
-    """
-    try:
-        setattr(current_user, 'todo_list', [])
-        db.commit()
-        
-        app_logger.info(f"사용자 {current_user.id}의 todo-list 삭제 완료")
-        
-        return {
-            "success": True,
-            "message": "todo-list가 성공적으로 삭제되었습니다."
-        }
-        
-    except Exception as e:
-        app_logger.error(f"todo-list 삭제 실패: {str(e)}")
-        raise InternalServerException(f"todo-list 삭제 중 오류가 발생했습니다: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"일정 생성 중 오류가 발생했습니다: {str(e)}")

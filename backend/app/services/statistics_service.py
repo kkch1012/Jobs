@@ -173,10 +173,22 @@ class StatisticsService:
                     
                     if rank_start_idx < len(sorted_skills):
                         filtered_skills = sorted_skills[rank_start_idx:rank_end_idx]
+                        # 순위 정보 추가
+                        for i, skill in enumerate(filtered_skills):
+                            skill["rank"] = rank_start + i
                         if filtered_skills:  # 필터링된 결과가 있는 경우만 추가
                             filtered_daily_data[date] = filtered_skills
                 
                 daily_data = filtered_daily_data
+            else:
+                # 순위 범위가 지정되지 않은 경우에도 순위 정보 추가
+                for date, skills in daily_data.items():
+                    # count 기준 내림차순 정렬
+                    sorted_skills = sorted(skills, key=lambda x: x["frequency"], reverse=True)
+                    # 순위 정보 추가
+                    for i, skill in enumerate(sorted_skills):
+                        skill["rank"] = i + 1
+                    daily_data[date] = sorted_skills
             
             return [
                 {

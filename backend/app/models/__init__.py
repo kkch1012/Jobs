@@ -20,6 +20,9 @@ from .weekly_skill_stat import WeeklySkillStat
 # Chat and session models
 from .chat_session import ChatSession
 
+# Todo list models
+from .todo_list import TodoList
+
 # MongoDB models
 from .mongo import MCPMessage
 
@@ -33,6 +36,8 @@ __all__ = [
     "JobPost", "JobRequiredSkill", "WeeklySkillStat",
     # Chat and session
     "ChatSession",
+    # Todo list
+    "TodoList",
     # MongoDB
     "MCPMessage"
 ]

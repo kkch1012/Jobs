@@ -12,4 +12,11 @@ class ChatSessionResponse(BaseModel):
     updated_at: datetime
 
     class Config:
+        from_attributes = True
+
+class ChatSessionSimpleResponse(BaseModel):
+    id: int
+    updated_at: datetime
+
+    class Config:
         from_attributes = True 
