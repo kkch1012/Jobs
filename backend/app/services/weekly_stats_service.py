@@ -102,6 +102,8 @@ class WeeklyStatsService:
         except Exception as e:
             logger.error(f"자동 통계 생성 실패: {str(e)}")
 
+
+
     @staticmethod
     def _generate_all_field_types_stats(db: Session):
         """
@@ -223,6 +225,37 @@ class WeeklyStatsService:
                     limited_skills.append(skill)
                 skill_counter.update(limited_skills)
         
+        # 4. 새로운 통계 생성 (2회 이상 언급된 스킬들만 저장)
+        # 날짜에서 주차 계산 (자동 계산)
+        year, week_number, _ = today.isocalendar()
+        
+        # count가 1인 스킬들은 제외 (2번 이상 언급된 스킬들만 저장)
+        filtered_skills = {skill: count for skill, count in skill_counter.items() if count >= 2}
+        
+        # 전체 스킬 개수 확인을 위한 로깅 추가
+        total_unique_skills = len(skill_counter)
+        filtered_unique_skills = len(filtered_skills)
+        total_skill_count = sum(skill_counter.values())
+        filtered_skill_count = sum(filtered_skills.values())
+        excluded_count = total_unique_skills - filtered_unique_skills
+        
+        logger.info(f"[스킬 필터링] 직무 '{job_role.job_name}' 필드 '{field_type}': 전체 {total_unique_skills}개 스킬 중 {filtered_unique_skills}개 저장 (2회 이상), {excluded_count}개 제외 (1회 언급)")
+        
+        # 상위 10개 스킬 미리보기
+        if filtered_skills:
+            top_10_preview = Counter(filtered_skills).most_common(10)
+            logger.info(f"[상위 10개 미리보기] {[(skill, count) for skill, count in top_10_preview]}")
+        
+        # 2회 이상 언급된 모든 스킬을 카운트 순으로 정렬
+        filtered_counter = Counter(filtered_skills)
+        skills_to_save = filtered_counter.most_common()  # 2회 이상 언급된 모든 스킬
+        
+        # 전체 스킬 저장하려면 아래 라인 사용 (주의: DB 용량 급증 가능)
+        # skills_to_save = skill_counter.most_common()  # 전체 저장 (1회 포함)
+        
+        # 디버깅을 위한 로그 추가
+        logger.info(f"직무 '{job_role.job_name}' 날짜 '{today}' 주차 '{week_number}' 필드 '{field_type}': {filtered_unique_skills}개 스킬 저장 (2회 이상 언급)")
+        
         # 3. 오늘 날짜의 기존 통계만 삭제 (덮어쓰기)
         deleted_count = db.query(WeeklySkillStat).filter(
             WeeklySkillStat.job_role_id == job_role.id,
@@ -233,19 +266,9 @@ class WeeklyStatsService:
         if deleted_count > 0:
             logger.info(f"직무 '{job_role.job_name}' 오늘({today}) 기존 통계 삭제: {deleted_count}개")
         
-        # 4. 새로운 통계 생성 (카운트 많은 순으로 상위 50개씩만 저장)
-        # 날짜에서 주차 계산 (자동 계산)
-        year, week_number, _ = today.isocalendar()
-        
-        # 카운트 많은 순으로 정렬하여 상위 50개만 선택
-        top_skills = skill_counter.most_common(50)
-        
-        # 디버깅을 위한 로그 추가
-        logger.info(f"직무 '{job_role.job_name}' 날짜 '{today}' 주차 '{week_number}' 필드 '{field_type}': 총 {len(skill_counter)}개 스킬 중 상위 {len(top_skills)}개 선택")
-        
-        # 새로운 통계 생성
+        # 5. 새로운 통계 생성 (2회 이상 언급된 모든 스킬 저장)
         stats_created = 0
-        for skill, count in top_skills:
+        for skill, count in skills_to_save:
             stat = WeeklySkillStat(
                 job_role_id=job_role.id,
                 week=week_number,  # 주차 자동 계산
@@ -259,6 +282,8 @@ class WeeklyStatsService:
         
         db.commit()
         return stats_created
+    
+
     
     @staticmethod
     def get_weekly_stats(

@@ -72,6 +72,8 @@ async def generate_daily_stats(
             detail=f"일간 통계 생성 요청 중 오류가 발생했습니다: {str(e)}"
         )
 
+
+
 @router.get(
     "/daily/{job_name}",
     summary="일간 스킬 통계 조회",
@@ -321,6 +323,7 @@ def weekly_skill_frequency(
   { "year": 2025, "week": 29, "skill": "SQL", "count": 7 },
   { "year": 2025, "week": 29, "skill": "Java", "count": 5 }
 ]
+```
 """,
     response_model=List[WeeklySkillStat]
 )
@@ -473,6 +476,7 @@ def daily_skill_frequency(
   "biggest_percentage": { "skill": "React", "week1_count": 2, "week2_count": 10, "difference": 8, "percentage_change": 400.0 },
   "smallest_percentage": { "skill": "SQL", "week1_count": 8, "week2_count": 8, "difference": 0, "percentage_change": 0.0 }
 }
+```
 """,
     response_model=Dict[str, Any]
 )

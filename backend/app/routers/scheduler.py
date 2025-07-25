@@ -158,3 +158,5 @@ def run_daily_batch_manual(
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"매일 아침 배치 작업 실행 실패: {str(e)}") 
+
+ 
