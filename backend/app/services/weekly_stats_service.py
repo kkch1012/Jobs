@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from app.models.job_post import JobPost
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.weekly_skill_stat import WeeklySkillStat
 from collections import Counter, defaultdict
 from typing import List, Dict, Any, Optional
@@ -49,7 +49,7 @@ class WeeklyStatsService:
             logger.info(f"오늘({today}) 기존 통계 삭제 완료: {deleted_count}개 (field_type={field_type})")
             
             # 2. 모든 직무 조회
-            job_roles = db.query(JobRequiredSkill).all()
+            job_roles = db.query(JobRole).all()
             total_stats_created = 0
             
             for job_role in job_roles:
@@ -155,7 +155,7 @@ class WeeklyStatsService:
             WeeklyStatsService._stats_generation_lock.release()
     
     @staticmethod
-    def _generate_stats_for_job_role(db: Session, job_role: JobRequiredSkill, field_type: str) -> int:
+    def _generate_stats_for_job_role(db: Session, job_role: JobRole, field_type: str) -> int:
         """
         특정 직무에 대해 일간 스킬 통계를 생성합니다.
         
@@ -281,8 +281,8 @@ class WeeklyStatsService:
         """
         try:
             # 1. 직무 조회
-            job_role = db.query(JobRequiredSkill).filter(
-                JobRequiredSkill.job_name == job_name
+            job_role = db.query(JobRole).filter(
+                JobRole.job_name == job_name
             ).first()
             
             if not job_role:
@@ -339,8 +339,8 @@ class WeeklyStatsService:
         """
         try:
             # 1. 직무 조회
-            job_role = db.query(JobRequiredSkill).filter(
-                JobRequiredSkill.job_name == job_name
+            job_role = db.query(JobRole).filter(
+                JobRole.job_name == job_name
             ).first()
             
             if not job_role:

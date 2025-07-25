@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from app.models.user import User
 from app.models.user_skill import UserSkill
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.weekly_skill_stat import WeeklySkillStat
 from app.utils.logger import app_logger
 
@@ -46,7 +46,7 @@ def get_job_categories(db: Session) -> List[str]:
         직무 카테고리 리스트
     """
     try:
-        job_names = db.query(JobRequiredSkill.job_name).distinct().all()
+        job_names = db.query(JobRole.job_name).distinct().all()
         categories = [name[0] for name in job_names if name[0]]
         
         app_logger.info(f"직무 카테고리 {len(categories)}개 조회 완료")
@@ -78,7 +78,7 @@ def get_trend_skills_by_category(db: Session, category: str, limit: int = 200) -
         query = text("""
             SELECT wss.skill, SUM(wss.count) AS total_count
             FROM weekly_skill_stats wss
-            JOIN job_required_skills jrs ON wss.job_role_id = jrs.id
+            JOIN job_roles jrs ON wss.job_role_id = jrs.id
             WHERE jrs.job_name = :category
             GROUP BY wss.skill
             ORDER BY total_count DESC

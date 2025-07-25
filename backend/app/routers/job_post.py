@@ -4,7 +4,7 @@ from sqlalchemy import and_, or_, null
 from typing import List, Optional
 from app.database import get_db
 from app.models.job_post import JobPost
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.user import User
 from app.models.user_similarity import UserSimilarity
 from app.schemas.job_post import JobPostResponse, JobPostSearchResponse
@@ -54,7 +54,7 @@ def read_job_posts(
 
         # 관계 데이터 미리 로드 (N+1 쿼리 방지)
         query = query.options(
-            joinedload(JobPost.job_required_skill)
+            joinedload(JobPost.job_role)
         )
 
         # 동적 필터링
@@ -76,10 +76,11 @@ def read_job_posts(
             filters.append(JobPost.employment_type.ilike(f"%{employment_type}%"))
         if tech_stack:
             filters.append(JobPost.tech_stack.ilike(f"%{tech_stack}%"))
+        # 직무명 필터링
         if job_name:
             # 직무명으로 조인 후 필터
-            query = query.join(JobPost.job_required_skill)
-            filters.append(JobRequiredSkill.job_name.ilike(f"%{job_name}%"))
+            query = query.join(JobPost.job_role)
+            filters.append(JobRole.job_name.ilike(f"%{job_name}%"))
         
         if filters:
             query = query.filter(and_(*filters))
@@ -232,10 +233,10 @@ def get_unique_tech_stacks(
         
         # 특정 직무가 지정된 경우 해당 직무의 기술 스택만 조회
         if job_name:
-            from app.models.job_required_skill import JobRequiredSkill
-            
-            job_role = db.query(JobRequiredSkill).filter(
-                JobRequiredSkill.job_name == job_name
+            from app.models.job_role import JobRole
+              
+            job_role = db.query(JobRole).filter(
+                JobRole.job_name == job_name
             ).first()
             
             if job_role:
@@ -333,7 +334,7 @@ def get_job_post_detail(
 
         # 관계 데이터 미리 로드
         query = query.options(
-            joinedload(JobPost.job_required_skill)
+            joinedload(JobPost.job_role)
         )
 
         result = query.first()

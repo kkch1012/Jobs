@@ -10,7 +10,7 @@ from app.models.skill import Skill
 from app.models.certificate import Certificate
 from app.models.roadmap import Roadmap
 from app.models.job_post import JobPost         # 추가
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.data.initial_data import (
     initial_skills,
     initial_certificates,

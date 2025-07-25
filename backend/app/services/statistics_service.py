@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 from collections import defaultdict
 from app.models.weekly_skill_stat import WeeklySkillStat
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.user_skill import UserSkill
 from app.models.user import User
 from app.schemas.visualization import WeeklySkillStat as WeeklySkillStatSchema
@@ -19,8 +19,8 @@ class StatisticsService:
     @staticmethod
     def get_job_role_id(job_name: str, db: Session) -> int:
         """직무명으로 직무 ID를 조회합니다."""
-        job_role = db.query(JobRequiredSkill).filter(
-            JobRequiredSkill.job_name == job_name
+        job_role = db.query(JobRole).filter(
+            JobRole.job_name == job_name
         ).first()
         
         if not job_role:
@@ -203,12 +203,12 @@ class StatisticsService:
             raise
     
     @staticmethod
-    def search_skills_by_keyword(keyword: str, db: Session) -> List[Dict[str, Any]]:
+    def search_skills_by_keyword(keyword: str, db: Session) -> Dict[str, List[Dict[str, Any]]]:
         """키워드로 스킬을 검색합니다."""
         try:
             # 직무별 스킬에서 검색
-            job_skills = db.query(JobRequiredSkill).filter(
-                JobRequiredSkill.skill_name.ilike(f"%{keyword}%")
+            job_skills = db.query(JobRole).filter(
+                JobRole.job_name.ilike(f"%{keyword}%")
             ).all()
             
             # 사용자 스킬에서 검색
@@ -219,9 +219,9 @@ class StatisticsService:
             result = {
                 "job_skills": [
                     {
-                        "skill_name": skill.skill_name,
+                        "skill_name": skill.job_name,
                         "job_name": skill.job_name,
-                        "importance": skill.importance
+                        "id": skill.id
                     }
                     for skill in job_skills
                 ],
@@ -239,4 +239,7 @@ class StatisticsService:
             
         except Exception as e:
             logger.error(f"스킬 검색 실패: {str(e)}")
-            raise 
+            return {
+                "job_skills": [],
+                "user_skills": []
+            } 

@@ -632,6 +632,37 @@ def delete_todo(
         app_logger.error(f"할 일 삭제 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"할 일 삭제 중 오류가 발생했습니다: {str(e)}")
 
+@router.delete("/clear", summary="모든 할 일 삭제")
+def delete_all_todos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """현재 사용자의 모든 할 일을 삭제합니다."""
+    try:
+        # 현재 사용자의 모든 할 일 조회
+        todos = db.query(TodoList).filter(TodoList.user_id == current_user.id).all()
+        
+        if not todos:
+            return {"message": "삭제할 할 일이 없습니다.", "deleted_count": 0}
+        
+        deleted_count = len(todos)
+        
+        # 모든 할 일 삭제
+        for todo in todos:
+            db.delete(todo)
+        
+        db.commit()
+        
+        app_logger.info(f"모든 할 일 삭제 완료: 사용자 {current_user.id}, 삭제된 할 일 수 {deleted_count}")
+        return {
+            "message": f"모든 할 일이 삭제되었습니다. (총 {deleted_count}개)",
+            "deleted_count": deleted_count
+        }
+        
+    except Exception as e:
+        app_logger.error(f"모든 할 일 삭제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"모든 할 일 삭제 중 오류가 발생했습니다: {str(e)}")
+
 @router.patch("/{todo_id}/toggle", response_model=TodoListResponse, summary="할 일 완료 상태 토글")
 def toggle_todo_completion(
     todo_id: int,

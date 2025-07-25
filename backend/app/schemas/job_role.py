@@ -1,10 +1,10 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-class JobRequiredSkillCreate(BaseModel):
+class JobRoleCreate(BaseModel):
     name: str
 
-class JobRequiredSkillResponse(BaseModel):
+class JobRoleResponse(BaseModel):
     id: int
     name: str
 
@@ -15,4 +15,4 @@ class JobNameResponse(BaseModel):
     name: str
 
     class Config:
-        from_attributes = True
+        from_attributes = True 

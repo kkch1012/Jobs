@@ -14,7 +14,7 @@ from .roadmap import Roadmap
 
 # Job related models
 from .job_post import JobPost
-from .job_required_skill import JobRequiredSkill
+from .job_role import JobRole
 from .weekly_skill_stat import WeeklySkillStat
 
 # Chat and session models
@@ -33,7 +33,7 @@ __all__ = [
     # Core
     "Skill", "Certificate", "Roadmap",
     # Job related
-    "JobPost", "JobRequiredSkill", "WeeklySkillStat",
+    "JobPost", "JobRole", "WeeklySkillStat",
     # Chat and session
     "ChatSession",
     # Todo list

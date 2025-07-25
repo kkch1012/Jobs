@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from collections import Counter
 import pytz
 from app.database import get_db
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.job_post import JobPost
 from app.models.user_skill import UserSkill
 from app.schemas.visualization import WeeklySkillStat, DailySkillStatWithRank, ResumeSkillComparison
@@ -110,8 +110,8 @@ async def get_daily_stats(
         
     try:
         # 1. 직무 조회
-        job_role = db.query(JobRequiredSkill).filter(
-            JobRequiredSkill.job_name == job_name
+        job_role = db.query(JobRole).filter(
+            JobRole.job_name == job_name
         ).first()
         
         if not job_role:
@@ -178,8 +178,8 @@ def get_weekly_stats_by_field(
     """특정 필드의 주간 스킬 통계를 조회합니다."""
     try:
         # 1. 직무 조회
-        job_role = db.query(JobRequiredSkill).filter(
-            JobRequiredSkill.job_name == job_name
+        job_role = db.query(JobRole).filter(
+            JobRole.job_name == job_name
         ).first()
         
         if not job_role:
@@ -239,7 +239,7 @@ def get_weekly_stats_by_field(
     description="""
 선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 지정된 주차 범위의 채용공고에서 추출된 **기술/키워드의 주별 등장 빈도**를 집계하여 반환합니다.
 
-- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- **직무명**은 등록된 직무 테이블(`JobRole`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, required_skills, preferred_skills, main_tasks_skills
@@ -307,7 +307,7 @@ def weekly_skill_frequency(
     description="""
 선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, **현재 주차의 채용공고**에서 추출된 **기술/키워드의 등장 빈도**를 집계하여 반환합니다.
 
-- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- **직무명**은 등록된 직무 테이블(`JobRole`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, required_skills, preferred_skills, main_tasks_skills
@@ -369,7 +369,7 @@ def weekly_skill_frequency_current(
     description="""
 선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, 지정된 날짜 범위의 채용공고에서 추출된 **기술/키워드의 일별 등장 빈도**를 집계하여 반환합니다.
 
-- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- **직무명**은 등록된 직무 테이블(`JobRole`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, required_skills, preferred_skills, main_tasks_skills
@@ -451,7 +451,7 @@ def daily_skill_frequency(
     description="""
 선택한 **직무명(`job_name`)**과 분석 필드(`field`)에 대해, **2개 주차의 스킬 빈도 차이**를 분석하여 반환합니다.
 
-- **직무명**은 등록된 직무 테이블(`JobRequiredSkill`)의 `job_name` 값으로 입력해야 합니다.
+- **직무명**은 등록된 직무 테이블(`JobRole`)의 `job_name` 값으로 입력해야 합니다.
 - 입력된 `job_name`이 존재하지 않을 경우 404 에러가 반환됩니다.
 - 분석 대상 필드(`field`)는 아래 중 하나여야 하며, 해당 필드는 채용공고(`JobPost`) 모델에 존재해야 합니다.
     - tech_stack, required_skills, preferred_skills, main_tasks_skills
@@ -606,7 +606,7 @@ async def resume_vs_job_skill_trend(
     current_week = current_date.isocalendar()[1]  # 현재 ISO 주차
     
     # 3. 직무별 현재 주차 스킬 빈도 데이터 조회
-    job_role = db.query(JobRequiredSkill).filter(JobRequiredSkill.job_name == job_name).first()
+    job_role = db.query(JobRole).filter(JobRole.job_name == job_name).first()
     if not job_role:
         raise HTTPException(status_code=404, detail="해당 직무명이 존재하지 않습니다.")
     job_role_id = job_role.id
@@ -991,7 +991,7 @@ def get_available_stats_dates(db: Session = Depends(get_db)):
     """
     try:
         from sqlalchemy import func, distinct
-        from app.models.job_required_skill import JobRequiredSkill
+        from app.models.job_role import JobRole
         
         # 1. 사용 가능한 날짜들 조회
         dates_query = db.query(

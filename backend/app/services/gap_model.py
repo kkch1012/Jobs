@@ -32,11 +32,11 @@ client = OpenAI(
 def get_trend_skills_by_category(category: str, db: Session) -> List[str]:
     """주간 스킬 통계에서 해당 직무의 트렌드 스킬 리스트를 조회합니다."""
     from app.models.weekly_skill_stat import WeeklySkillStat
-    from app.models.job_required_skill import JobRequiredSkill
+    from app.models.job_role import JobRole
     
     # 직무 ID 조회
-    job_role = db.query(JobRequiredSkill).filter(
-        JobRequiredSkill.job_name == category
+    job_role = db.query(JobRole).filter(
+        JobRole.job_name == category
     ).first()
     
     if not job_role:

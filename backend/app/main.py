@@ -12,7 +12,7 @@ from app.routers import (
     skill,
     certificate,
     roadmap,
-    job_required_skill,
+    job_role,
     user_preference,
     user_roadmap,
     job_post,
@@ -104,7 +104,7 @@ app.include_router(user.router)
 app.include_router(skill.router)
 app.include_router(certificate.router)
 app.include_router(roadmap.router)
-app.include_router(job_required_skill.router)
+app.include_router(job_role.router)
 app.include_router(user_preference.router)
 app.include_router(user_roadmap.router)
 app.include_router(job_post.router)

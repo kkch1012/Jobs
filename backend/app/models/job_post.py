@@ -3,7 +3,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database.PostgreSQL import Base
-from app.models.job_required_skill import JobRequiredSkill
+from app.models.job_role import JobRole
 from app.models.user_similarity import UserSimilarity
 from pgvector.sqlalchemy import Vector
 
@@ -16,7 +16,7 @@ class JobPost(Base):
     size = Column(String(255), nullable=True)  # 기업 규모
     address = Column(String(255), nullable=True)  # 주소
 
-    job_required_skill_id = Column(Integer, ForeignKey("job_required_skills.id", ondelete="SET NULL"), nullable=True)  # 직무 ID 참조
+    job_required_skill_id = Column(Integer, ForeignKey("job_roles.id", ondelete="SET NULL"), nullable=True)  # 직무 ID 참조
 
     employment_type = Column(String(255), nullable=True)  # 고용형태
     applicant_type = Column(Text, nullable=False)  # 지원 자격
@@ -38,6 +38,6 @@ class JobPost(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)  # 생성 시각
 
     # 관계 설정 (선택사항)
-    job_required_skill = relationship("JobRequiredSkill", backref="job_posts")
+    job_role = relationship("JobRole", backref="job_posts")
     liked_by = relationship("UserPreference", back_populates="job_posting", cascade="all, delete-orphan")
     user_similarities = relationship("UserSimilarity", back_populates="job_post", cascade="all, delete-orphan")

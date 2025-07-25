@@ -13,7 +13,7 @@ from .roadmap import RoadmapCreate, RoadmapUpdate, RoadmapResponse
 
 # Job related schemas
 from .job_post import JobPostResponse, JobPostSimpleResponse, JobPostBasicResponse, JobPostSearchResponse
-from .job_required_skill import JobRequiredSkillCreate, JobRequiredSkillResponse
+from .job_role import JobRoleCreate, JobRoleResponse
 
 # Chat and session schemas
 from .chat_session import ChatSessionCreate, ChatSessionResponse
@@ -38,7 +38,7 @@ __all__ = [
     # Job related
     "JobPostResponse", "JobPostSimpleResponse", "JobPostBasicResponse", "JobPostSearchResponse",
 
-    "JobRequiredSkillCreate", "JobRequiredSkillResponse",
+    "JobRoleCreate", "JobRoleResponse",
     # Chat and session
     "ChatSessionCreate", "ChatSessionResponse",
     "MessageIn",
