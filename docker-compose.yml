@@ -1,0 +1,148 @@
+version: '3.8'
+
+services:
+  # FastAPI 메인 서버
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jobs_fastapi
+    ports:
+      - "8000:8000"
+    environment:
+      - SQLALCHEMY_DATABASE_URI=postgresql://myuser:mypassword@postgres:5432/jobs
+      - MONGO_URI=mongodb://admin:yourpassword@mongo:27017/?authSource=admin
+      - MONGO_DB_NAME=jobs_db
+      - REDIS_URL=redis://redis:6379
+      - FASTAPI_SERVER_URL=http://fastapi:8000
+      - MCP_SERVER_URL=http://mcp-server:8001
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY:-SUPERSECRETKEY}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - BATCH_SCHEDULE_HOUR=8
+      - BATCH_SCHEDULE_MINUTE=0
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # MCP 서버
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: jobs_mcp_server
+    ports:
+      - "8001:8001"
+    environment:
+      - FASTAPI_SERVER_URL=http://fastapi:8000
+      - SQLALCHEMY_DATABASE_URI=postgresql://myuser:mypassword@postgres:5432/jobs
+      - MONGO_URI=mongodb://admin:yourpassword@mongo:27017/?authSource=admin
+      - MONGO_DB_NAME=jobs_db
+      - REDIS_URL=redis://redis:6379
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY:-SUPERSECRETKEY}
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # PostgreSQL 데이터베이스
+  postgres:
+    image: postgres:15-alpine
+    container_name: jobs_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=jobs
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # MongoDB 데이터베이스
+  mongo:
+    image: mongo:7.0
+    container_name: jobs_mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=yourpassword
+      - MONGO_INITDB_DATABASE=jobs_db
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # Redis 캐시
+  redis:
+    image: redis:7-alpine
+    container_name: jobs_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # pgAdmin (선택사항 - PostgreSQL 관리용)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: jobs_pgadmin
+    ports:
+      - "8080:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+  # MongoDB Express (선택사항 - MongoDB 관리용)
+  mongo-express:
+    image: mongo-express:latest
+    container_name: jobs_mongo_express
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=yourpassword
+      - ME_CONFIG_MONGODB_URL=mongodb://admin:yourpassword@mongo:27017/?authSource=admin
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin
+    depends_on:
+      - mongo
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
+networks:
+  jobs_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local 

@@ -1,0 +1,142 @@
+version: '3.8'
+
+# AWS EC2 배포용 Docker Compose
+# 사용법: docker-compose -f ec2-docker-compose.yml up -d
+
+services:
+  # FastAPI 메인 서버 (Docker Hub 이미지)
+  fastapi:
+    image: chanerdy/jobs-api:latest
+    container_name: jobs_fastapi_prod
+    ports:
+      - "8000:8000"
+    # 누락된 패키지들 자동 설치
+    command: sh -c "pip install python-multipart email-validator && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      - SQLALCHEMY_DATABASE_URI=postgresql://myuser:mypassword@postgres:5432/jobs
+      - MONGO_URI=mongodb://admin:yourpassword@mongo:27017/?authSource=admin
+      - MONGO_DB_NAME=jobs_db
+      - REDIS_URL=redis://:redispassword@redis:6379
+      - FASTAPI_SERVER_URL=http://fastapi:8000
+      - MCP_SERVER_URL=http://mcp-server:8001
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+      - BATCH_SCHEDULE_HOUR=2
+      - BATCH_SCHEDULE_MINUTE=0
+      - ENVIRONMENT=production
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+    networks:
+      - jobs_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # 패키지 설치 시간을 고려한 지연
+
+  # MCP 서버 (Docker Hub 이미지)
+  mcp-server:
+    image: chanerdy/jobs-mcp:latest
+    container_name: jobs_mcp_server_prod
+    ports:
+      - "8001:8001"
+    # 누락된 패키지들 자동 설치
+    command: sh -c "pip install python-multipart email-validator && uvicorn mcp_server:app --host 0.0.0.0 --port 8001"
+    environment:
+      - FASTAPI_SERVER_URL=http://fastapi:8000
+      - SQLALCHEMY_DATABASE_URI=postgresql://myuser:mypassword@postgres:5432/jobs
+      - MONGO_URI=mongodb://admin:yourpassword@mongo:27017/?authSource=admin
+      - MONGO_DB_NAME=jobs_db
+      - REDIS_URL=redis://:redispassword@redis:6379
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+    networks:
+      - jobs_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # 패키지 설치 시간을 고려한 지연
+
+  # PostgreSQL 데이터베이스 (pgvector 포함)
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: jobs_postgres_prod
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=jobs
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - jobs_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser -d jobs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MongoDB 데이터베이스
+  mongo:
+    image: mongo:7.0
+    container_name: jobs_mongo_prod
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=yourpassword
+      - MONGO_INITDB_DATABASE=jobs_db
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - jobs_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis 캐시
+  redis:
+    image: redis:7-alpine
+    container_name: jobs_redis_prod
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+    networks:
+      - jobs_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  jobs_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  mongo_data:
+    driver: local
+  redis_data:
+    driver: local 
