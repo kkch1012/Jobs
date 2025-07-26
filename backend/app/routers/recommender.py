@@ -312,6 +312,7 @@ def generate_job_explanations(
             detail=f"설명 생성 중 오류가 발생했습니다: {str(e)}"
         )
 
+
 @router.get(
     "/jobs/paginated",
     summary="유사도 기반 채용공고 페이지별 조회",
@@ -495,6 +496,192 @@ async def recommend_job_for_current_user(
             detail=f"직무 추천 중 오류가 발생했습니다: {str(e)}"
         )
 
+
+@router.get(
+    "/job/top5",
+    summary="직무 추천 상위 5개",
+    description="""
+현재 로그인된 사용자에게 적합한 직무를 스코어 순으로 상위 5개 반환합니다.
+
+- **스코어 계산**: 사용자의 기술 스택과 각 직무별 요구 기술의 매칭도 계산
+- **Top 5 반환**: 점수가 높은 순으로 상위 5개 직무 반환
+- **응답**: 직무명과 매칭 점수 포함
+- **캐싱**: 1시간 동안 같은 사용자에 대한 중복 추천을 방지합니다.
+"""
+)
+async def get_top5_job_recommendations(
+    force_refresh: bool = Query(False, description="캐시를 무시하고 새로 추천 수행"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        user_id = getattr(current_user, "id", None)
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="사용자 ID를 확인할 수 없습니다.")
+        
+        # 캐시 키 생성
+        cache_key = f"user:{user_id}:job_top5"
+        
+        # 캐시 확인 (force_refresh가 False인 경우만)
+        if not force_refresh:
+            cached_data = await redis_cache_manager.get_cached_data("job_top5", cache_key, timedelta(hours=1))
+            if cached_data is not None:
+                logger.info(f"Redis 캐시된 직무 상위 5개 추천 결과 반환: 사용자 {user_id}")
+                return cached_data
+        
+        # 캐시가 없거나 만료된 경우 새로 추천 수행
+        logger.info(f"새로운 직무 상위 5개 추천 수행: 사용자 {user_id}")
+        
+        # jobs_gap.py의 함수를 사용하여 모든 직무별 점수 계산
+        from app.services.jobs_gap import get_top_job_recommendations
+        
+        top_jobs = get_top_job_recommendations(current_user, db, top_k=5)
+        
+        response_data = {
+            "top_jobs": top_jobs,
+            "total_jobs": len(top_jobs),
+            "user_id": current_user.id
+        }
+        
+        # Redis 캐시에 저장
+        await redis_cache_manager.set_cached_data("job_top5", cache_key, response_data, timedelta(hours=1))
+        
+        logger.info(f"직무 상위 5개 추천 완료 및 Redis 캐시 저장: 사용자 {user_id}")
+        return response_data
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"직무 상위 5개 추천 중 오류가 발생했습니다: {str(e)}"
+        )
+
+@router.post(
+    "/job/explanation",
+    summary="직무 추천 이유 설명 생성",
+    description="""
+현재 사용자에게 추천된 직무들에 대한 상세한 추천 이유와 설명을 생성합니다.
+
+- **입력**: 직무명 리스트 (선택사항, 없으면 상위 5개 자동 생성)
+- **출력**: 각 직무별 상세한 추천 이유와 설명
+- **분석**: 사용자 기술 스택과 직무별 요구 기술의 매칭도 분석
+"""
+)
+async def generate_job_recommendation_explanations(
+    job_names: list[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=500, 
+            detail="OPENROUTER_API_KEY 환경변수가 설정되어 있지 않습니다."
+        )
+    
+    try:
+        # 직무명이 제공되지 않은 경우 상위 5개 자동 생성
+        if not job_names:
+            from app.services.jobs_gap import get_top_job_recommendations
+            top_jobs = get_top_job_recommendations(current_user, db, top_k=5)
+            if not top_jobs:
+                return {"explanations": "추천할 직무를 찾을 수 없습니다.", "job_names": []}
+            job_names = [job["job_name"] for job in top_jobs]
+        
+        # 사용자 정보 요약
+        from app.services.similarity_scores import summarize_user_for_embedding
+        user_summary = summarize_user_for_embedding(current_user)
+        
+        # 각 직무별 점수와 상세 정보 조회
+        from app.services.jobs_gap import recommend_job_for_user
+        job_analysis = recommend_job_for_user(current_user, db, verbose=True)
+        all_scores = job_analysis.get("all_scores", [])
+        
+        # 요청된 직무들의 상세 정보 수집
+        job_details = []
+        for job_name in job_names:
+            # 해당 직무의 점수 정보 찾기
+            job_score_info = next((job for job in all_scores if job["job_name"] == job_name), None)
+            
+            if job_score_info:
+                score = job_score_info["score"]
+                details = job_score_info.get("details", [])
+                
+                # 매칭된 스킬들 추출
+                matched_skills = []
+                for detail in details:
+                    matched_skills.append({
+                        "skill": detail["skill"],
+                        "proficiency": detail["proficiency"],
+                        "market_demand": detail["count"],
+                        "contribution": detail["contribution"]
+                    })
+                
+                job_detail = (
+                    f"직무명: {job_name}\n"
+                    f"적합도 점수: {score:.2f}\n"
+                    f"매칭된 스킬 수: {len(matched_skills)}\n"
+                    f"주요 매칭 스킬:\n"
+                )
+                
+                # 상위 10개 매칭 스킬 추가
+                for skill_info in sorted(matched_skills, key=lambda x: x["contribution"], reverse=True)[:10]:
+                    job_detail += f"  - {skill_info['skill']} (숙련도: {skill_info['proficiency']}, 시장수요: {skill_info['market_demand']}, 기여도: {skill_info['contribution']:.1f})\n"
+            else:
+                job_detail = f"직무명: {job_name}\n적합도 점수: 데이터 없음\n"
+            
+            job_details.append(job_detail)
+        
+        jobs_text = "\n---\n".join(job_details)
+        
+        explanation_prompt = f"""
+다음은 사용자 정보와 추천된 직무들입니다.
+
+[사용자 정보]
+{user_summary}
+
+[추천된 직무 분석]
+{jobs_text}
+
+각 직무에 대해 다음을 설명해주세요:
+1. 이 직무가 사용자에게 적합한 이유
+2. 사용자의 어떤 기술이나 경험이 이 직무와 잘 매칭되는지
+3. 해당 직무에서 성공하기 위해 추가로 필요한 기술이나 준비사항
+4. 현재 시장에서 이 직무의 전망과 특징
+
+주의사항:
+- 마크다운 형식(**, ### 등)을 사용하지 말고 일반 텍스트로 작성해주세요
+- 각 직무별로 명확하게 구분하여 설명해주세요
+- 줄바꿈을 적절히 사용하여 읽기 쉽게 작성해주세요
+- 번호나 기호를 사용하여 구조화해주세요
+- 모든 설명은 반드시 한국어로 작성해주세요
+- 적합도 점수와 매칭된 스킬 정보를 활용하여 구체적으로 설명해주세요
+"""
+
+        # LLM API 호출
+        from app.services.recommender import call_qwen_api
+        llm_explanation = call_qwen_api(explanation_prompt, api_key)
+        
+        if llm_explanation:
+            # 마크다운 형식 제거
+            from app.utils.text_utils import clean_markdown_text
+            cleaned_explanation = clean_markdown_text(llm_explanation)
+            return {
+                "explanations": cleaned_explanation,
+                "job_names": job_names,
+                "user_id": current_user.id
+            }
+        else:
+            return {
+                "explanations": "설명 생성에 실패했습니다.",
+                "job_names": job_names,
+                "user_id": current_user.id
+            }
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"직무 추천 설명 생성 중 오류가 발생했습니다: {str(e)}"
+        )
 
 @router.get(
     "/job/simple",

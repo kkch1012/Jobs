@@ -19,11 +19,12 @@ def get_top_n_jobs_with_scores(user: User, db: Session, n: int = 20) -> List[tup
     UserSimilarity 테이블에서 미리 계산된 유사도를 사용합니다.
     """
     try:
-        # UserSimilarity 테이블에서 상위 N개 유사도 조회
+        # UserSimilarity 테이블에서 상위 N개 유사도 조회 (만료되지 않은 공고만)
         top_similarities = db.query(UserSimilarity, JobPost).join(
             JobPost, UserSimilarity.job_post_id == JobPost.id
         ).filter(
-            UserSimilarity.user_id == user.id
+            UserSimilarity.user_id == user.id,
+            JobPost.is_expired == False
         ).order_by(
             desc(UserSimilarity.similarity)
         ).limit(n).all()
@@ -31,14 +32,18 @@ def get_top_n_jobs_with_scores(user: User, db: Session, n: int = 20) -> List[tup
         if not top_similarities:
             # 유사도가 없으면 자동 계산 시도
             recommender_logger.info(f"사용자 {user.id}의 유사도 데이터가 없어 자동 계산을 시도합니다.")
-            job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+            job_posts = db.query(JobPost).filter(
+                JobPost.full_embedding.isnot(None),
+                JobPost.is_expired == False
+            ).all()
             if job_posts:
                 auto_compute_user_similarity(user, db, job_posts)
                 # 다시 조회
                 top_similarities = db.query(UserSimilarity, JobPost).join(
                     JobPost, UserSimilarity.job_post_id == JobPost.id
                 ).filter(
-                    UserSimilarity.user_id == user.id
+                    UserSimilarity.user_id == user.id,
+                    JobPost.is_expired == False
                 ).order_by(
                     desc(UserSimilarity.similarity)
                 ).limit(n).all()
