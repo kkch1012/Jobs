@@ -602,36 +602,6 @@ def update_todo(
         app_logger.error(f"할 일 수정 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"할 일 수정 중 오류가 발생했습니다: {str(e)}")
 
-@router.delete("/{todo_id}", summary="할 일 삭제")
-def delete_todo(
-    todo_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """할 일을 삭제합니다."""
-    try:
-        todo = db.query(TodoList).filter(
-            and_(
-                TodoList.id == todo_id,
-                TodoList.user_id == current_user.id
-            )
-        ).first()
-        
-        if not todo:
-            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
-        
-        db.delete(todo)
-        db.commit()
-        
-        app_logger.info(f"할 일 삭제 완료: 사용자 {current_user.id}, 할 일 ID {todo_id}")
-        return {"message": "할 일이 삭제되었습니다."}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        app_logger.error(f"할 일 삭제 실패: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"할 일 삭제 중 오류가 발생했습니다: {str(e)}")
-
 @router.delete("/clear", summary="모든 할 일 삭제")
 def delete_all_todos(
     db: Session = Depends(get_db),
@@ -662,6 +632,36 @@ def delete_all_todos(
     except Exception as e:
         app_logger.error(f"모든 할 일 삭제 실패: {str(e)}")
         raise HTTPException(status_code=500, detail=f"모든 할 일 삭제 중 오류가 발생했습니다: {str(e)}")
+
+@router.delete("/{todo_id}", summary="할 일 삭제")
+def delete_todo(
+    todo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """할 일을 삭제합니다."""
+    try:
+        todo = db.query(TodoList).filter(
+            and_(
+                TodoList.id == todo_id,
+                TodoList.user_id == current_user.id
+            )
+        ).first()
+        
+        if not todo:
+            raise HTTPException(status_code=404, detail="할 일을 찾을 수 없습니다.")
+        
+        db.delete(todo)
+        db.commit()
+        
+        app_logger.info(f"할 일 삭제 완료: 사용자 {current_user.id}, 할 일 ID {todo_id}")
+        return {"message": "할 일이 삭제되었습니다."}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"할 일 삭제 실패: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"할 일 삭제 중 오류가 발생했습니다: {str(e)}")
 
 @router.patch("/{todo_id}/toggle", response_model=TodoListResponse, summary="할 일 완료 상태 토글")
 def toggle_todo_completion(
@@ -816,12 +816,12 @@ async def generate_todo_list(
         created_todos = []
         for day_schedule in schedule_data.get("schedule", []):
             for task in day_schedule.get("tasks", []):
-                # 마감일 계산 (일정의 날짜 + 1일)
+                # 마감일 계산 (일정의 날짜와 동일하게 설정)
                 try:
                     task_date = datetime.strptime(day_schedule["date"], "%Y-%m-%d")
-                    due_date = task_date + timedelta(days=1)
+                    due_date = task_date  # 같은 날로 설정
                 except:
-                    due_date = datetime.now() + timedelta(days=1)
+                    due_date = datetime.now()
                 
                 # 우선순위 결정
                 priority = "medium"

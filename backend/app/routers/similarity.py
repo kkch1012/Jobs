@@ -32,8 +32,11 @@ def compute_and_save_similarity(
     user = current_user
     
     try:
-        # 유효한 임베딩을 가진 채용공고 조회
-        job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+        # 유효한 임베딩을 가진 만료되지 않은 채용공고 조회
+        job_posts = db.query(JobPost).filter(
+            JobPost.full_embedding.isnot(None),
+            JobPost.is_expired == False
+        ).all()
         
         if not job_posts:
             return {"message": "계산할 채용공고가 없습니다.", "scores_count": 0}
@@ -157,8 +160,11 @@ def get_top_job_ids(
         if not user:
             raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
         
-        # 유효한 임베딩을 가진 채용공고 조회
-        job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+        # 유효한 임베딩을 가진 만료되지 않은 채용공고 조회
+        job_posts = db.query(JobPost).filter(
+            JobPost.full_embedding.isnot(None),
+            JobPost.is_expired == False
+        ).all()
         
         if not job_posts:
             return {"user_id": user_id, "top_job_ids": [], "message": "계산할 채용공고가 없습니다."}

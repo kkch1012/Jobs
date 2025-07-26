@@ -28,8 +28,13 @@ router = APIRouter(prefix="/users", tags=["User"])
              operation_id="signup_by_id",
              summary="ID 기반 회원가입")
 def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
+    # 이메일 중복 체크
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
+    
+    # 닉네임 중복 체크
+    if db.query(User).filter(User.nickname == user_data.nickname).first():
+        raise HTTPException(status_code=400, detail="이미 존재하는 닉네임입니다.")
 
     user = User(
         email=user_data.email,
@@ -51,8 +56,13 @@ def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
              operation_id="signup_by_email", 
              summary="소셜 기반 회원가입")
 def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
+    # 이메일 중복 체크
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="이미 존재하는 이메일입니다.")
+    
+    # 닉네임 중복 체크
+    if db.query(User).filter(User.nickname == user_data.nickname).first():
+        raise HTTPException(status_code=400, detail="이미 존재하는 닉네임입니다.")
 
     user = User(
         email=user_data.email,

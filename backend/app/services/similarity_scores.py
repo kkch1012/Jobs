@@ -278,7 +278,10 @@ def auto_compute_all_users_similarity(db: Session) -> dict:
     try:
         similarity_logger.info("전체 사용자 유사도 자동 계산 시작")
         users = db.query(User).all()
-        job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+        job_posts = db.query(JobPost).filter(
+            JobPost.full_embedding.isnot(None),
+            JobPost.is_expired == False
+        ).all()
         
         results = {
             "total_users": len(users),
@@ -339,7 +342,10 @@ def auto_compute_similarity_for_new_job(job_id: int, db: Session) -> bool:
     try:
         similarity_logger.info(f"새 채용공고 {job_id}에 대한 전체 사용자 유사도 재계산 시작")
         users = db.query(User).all()
-        job_posts = db.query(JobPost).filter(JobPost.full_embedding.isnot(None)).all()
+        job_posts = db.query(JobPost).filter(
+            JobPost.full_embedding.isnot(None),
+            JobPost.is_expired == False
+        ).all()
         
         success_count = 0
         error_count = 0
