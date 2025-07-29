@@ -25,6 +25,22 @@ class UserCreateEmail(BaseModel):
     birth_date: date
     gender: str
 
+# 네이버 OAuth 관련 스키마
+class NaverCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+class NaverUserInfo(BaseModel):
+    email: str
+    name: str
+    nickname: str
+
+class UserCreateNaver(BaseModel):
+    """네이버 OAuth로 받은 정보로 회원가입"""
+    email: EmailStr
+    name: str
+    nickname: str
+
 # 사용자 응답용
 class UserResponse(BaseModel):
     id: int

@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
+import httpx
+import os
 from app.database import get_db
 from app.models.user import User
 from app.models.user_skill import UserSkill
@@ -10,7 +12,10 @@ from app.schemas.user import (
     UserCreateEmail,
     UserResponse,
     ResumeUpdate,
-    UserResumeResponse
+    UserResumeResponse,
+    NaverCallbackRequest,
+    NaverUserInfo,
+    UserCreateNaver
 )
 from app.utils.dependencies import get_current_user, get_optional_current_user
 from app.core.security import get_password_hash
@@ -53,8 +58,8 @@ def signup_by_id(user_data: UserCreateID, db: Session = Depends(get_db)):
 
 @router.post("/signup/email", 
              response_model=UserResponse,
-             operation_id="signup_by_email", 
-             summary="소셜 기반 회원가입")
+             operation_id="signup_by_email",
+             summary="이메일 기반 (소셜 로그인) 회원가입")
 def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
     # 이메일 중복 체크
     if db.query(User).filter(User.email == user_data.email).first():
@@ -71,12 +76,96 @@ def signup_by_email(user_data: UserCreateEmail, db: Session = Depends(get_db)):
         phone_number=user_data.phone_number,
         birth_date=user_data.birth_date,
         gender=user_data.gender,
-        signup_type="email"
+        signup_type="email",
+        hashed_password=None  # 소셜 로그인은 비밀번호 없음
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user
+
+@router.post("/signup/naver",
+             response_model=UserResponse,
+             operation_id="signup_by_naver", 
+             summary="네이버 OAuth 회원가입")
+async def signup_by_naver(data: NaverCallbackRequest, db: Session = Depends(get_db)):
+    """네이버 OAuth 콜백을 받아서 회원가입을 처리합니다."""
+    try:
+        # 1. Access Token 획득
+        token_url = "https://nid.naver.com/oauth2.0/token"
+        token_data = {
+            "grant_type": "authorization_code",
+            "client_id": os.getenv("NAVER_CLIENT_ID"),
+            "client_secret": os.getenv("NAVER_CLIENT_SECRET"),
+            "code": data.code,
+            "state": data.state,
+        }
+        
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(token_url, data=token_data)
+            token_json = token_response.json()
+            
+            if "access_token" not in token_json:
+                raise HTTPException(status_code=400, detail="네이버 토큰 획득 실패")
+            
+            access_token = token_json["access_token"]
+            
+            # 2. 사용자 정보 조회
+            user_info_url = "https://openapi.naver.com/v1/nid/me"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            user_response = await client.get(user_info_url, headers=headers)
+            user_json = user_response.json()
+            
+            if user_json.get("resultcode") != "00":
+                raise HTTPException(status_code=400, detail="네이버 사용자 정보 조회 실패")
+            
+            naver_user = user_json["response"]
+            email = naver_user.get("email")
+            name = naver_user.get("name")
+            nickname = naver_user.get("nickname")
+            
+            if not email:
+                raise HTTPException(status_code=400, detail="이메일 정보를 가져올 수 없습니다")
+            
+            # 3. 중복 확인
+            existing_user = db.query(User).filter(User.email == email).first()
+            if existing_user:
+                raise HTTPException(status_code=400, detail="이미 가입된 이메일입니다")
+            
+            # 닉네임 중복 확인 및 자동 생성
+            original_nickname = nickname or email.split("@")[0]
+            final_nickname = original_nickname
+            counter = 1
+            
+            while db.query(User).filter(User.nickname == final_nickname).first():
+                final_nickname = f"{original_nickname}_{counter}"
+                counter += 1
+            
+            # 4. 신규 사용자 생성
+            user = User(
+                email=email,
+                name=name or nickname or email.split("@")[0],
+                nickname=final_nickname,
+                signup_type="naver",
+                hashed_password=None,  # 소셜 로그인은 비밀번호 없음
+                phone_number="",  # 네이버에서 제공하지 않는 정보는 빈값
+                birth_date=None,
+                gender=""
+            )
+            
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            
+            app_logger.info(f"네이버 OAuth 회원가입 완료: {email}")
+            return user
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        app_logger.error(f"네이버 회원가입 처리 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"회원가입 처리 중 오류가 발생했습니다: {str(e)}")
 
 # 내 정보 조회
 @router.get("/me", response_model=UserResponse, 

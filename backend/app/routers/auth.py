@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, HTTPException
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from datetime import timedelta
+import httpx
+import os
 
 from app.database import get_db
 from app.models.user import User
 from app.core.security import verify_password, get_password_hash, create_access_token
 from app.utils.exceptions import UnauthorizedException, BadRequestException
+from app.schemas.user import NaverCallbackRequest
 
 router = APIRouter(tags=["auth"])
 
@@ -65,3 +68,73 @@ def social_login(data: SocialLoginRequest, db: Session = Depends(get_db)) -> Tok
         expires_delta=timedelta(days=1)  # 7일로 토큰 만료 시간 설정
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+# 네이버 로그인 (기존 회원용)
+@router.post(
+    "/naver/login",
+    summary="네이버 로그인 (기존 회원)",
+    operation_id="naver_login",
+    description="기존 네이버 회원의 로그인을 처리합니다. 신규 가입은 /users/signup/naver 사용",
+    response_model=TokenResponse,
+)
+async def naver_login(data: NaverCallbackRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    try:
+        # 1. Access Token 획득
+        token_url = "https://nid.naver.com/oauth2.0/token"
+        token_data = {
+            "grant_type": "authorization_code",
+            "client_id": os.getenv("NAVER_CLIENT_ID"),
+            "client_secret": os.getenv("NAVER_CLIENT_SECRET"),
+            "code": data.code,
+            "state": data.state,
+        }
+        
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(token_url, data=token_data)
+            token_json = token_response.json()
+            
+            if "access_token" not in token_json:
+                raise HTTPException(status_code=400, detail="네이버 토큰 획득 실패")
+            
+            access_token = token_json["access_token"]
+            
+            # 2. 사용자 정보 조회
+            user_info_url = "https://openapi.naver.com/v1/nid/me"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            
+            user_response = await client.get(user_info_url, headers=headers)
+            user_json = user_response.json()
+            
+            if user_json.get("resultcode") != "00":
+                raise HTTPException(status_code=400, detail="네이버 사용자 정보 조회 실패")
+            
+            naver_user = user_json["response"]
+            email = naver_user.get("email")
+            
+            if not email:
+                raise HTTPException(status_code=400, detail="이메일 정보를 가져올 수 없습니다")
+            
+            # 3. 기존 사용자 확인
+            user = db.query(User).filter(User.email == email).first()
+            
+            if not user:
+                raise HTTPException(
+                    status_code=404, 
+                    detail="가입되지 않은 사용자입니다. /users/signup/naver 에서 회원가입을 진행해주세요."
+                )
+            
+            if user.signup_type != "naver":
+                raise BadRequestException("네이버 로그인 회원이 아닙니다")
+            
+            # 4. JWT 토큰 발급
+            access_token = create_access_token(
+                {"sub": str(user.id)}, 
+                expires_delta=timedelta(days=7)
+            )
+            
+            return {"access_token": access_token, "token_type": "bearer"}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"네이버 로그인 처리 중 오류: {str(e)}")
