@@ -112,20 +112,52 @@ class OpenRouterClient:
                     "education_status": "학적상태 (재학중/졸업/휴학)",
                     "degree": "학위 (학사/석사/박사)",
                     "language_score": "어학점수 (예: TOEIC 900, IELTS 7.0)",
-                    "working_year": "경력연차 (예: 3년, 신입)",
+                    "working_year": "근무경력 (연 단위 숫자)",
                     "skills": "기술스택 목록",
                     "certificates": "자격증 목록",
                     "experience": "경험 목록"
                 }
             },
-            "get_my_resume": {
-                "description": "내 이력서 조회",
+            "get_my_skills": {
+                "description": "내 보유 스킬 조회",
+                "parameters": {
+                    "skill_name": "특정 스킬명 (선택사항, 없으면 전체 조회) (예: Python, AWS, React)"
+                }
+            },
+            "add_my_skills": {
+                "description": "내 스킬 추가",
+                "parameters": {
+                    "skill_name": "추가할 스킬명 (예: Python, AWS, React)",
+                    "proficiency": "숙련도 (초급/중급/고급) - 선택사항"
+                }
+            },
+            "get_my_certificates": {
+                "description": "내 보유 자격증 조회",
                 "parameters": {}
+            },
+            "add_my_certificates": {
+                "description": "내 자격증 추가",
+                "parameters": {
+                    "certificate_name": "추가할 자격증명 (예: TOEIC, 정보처리기사)",
+                    "acquired_date": "취득일 (YYYY-MM-DD 형식) - 선택사항"
+                }
+            },
+            "update_my_skill_proficiency": {
+                "description": "내 보유 스킬의 숙련도 변경",
+                "parameters": {
+                    "skill_name": "숙련도를 변경할 스킬명 (예: Python, AWS, React)",
+                    "proficiency": "새로운 숙련도 (초급/중급/고급)"
+                }
             }
         }
         
         system_prompt = f"""
 당신은 사용자의 메시지를 분석하여 적절한 API를 선택하고, 관련 파라미터를 정확히 추출하는 AI 어시스턴트입니다.
+
+**핵심 규칙 - 스킬 vs 이력서 구분:**
+1. 스킬/기술 이름이 포함된 추가 요청은 반드시 `add_my_skills`
+2. 대학교, 전공, 학점, 경력 등은 `update_resume`
+3. "이력서에 [스킬명] 추가" = `add_my_skills` (절대 update_resume 아님!)
 
 **사용 가능한 API 목록:**
 {json.dumps(available_apis, ensure_ascii=False, indent=2)}
@@ -174,17 +206,20 @@ class OpenRouterClient:
 
 **Intent 분류 규칙:**
 - 이력서 관련: "내 이력서", "이력서 보여줘" → `get_my_resume`
-- 이력서 수정: "이력서 수정", "이력서 업데이트" → `update_resume`
+- 이력서 수정: "이력서 수정", "이력서 업데이트", "학교 추가", "전공 추가", "학점 추가" → `update_resume`
 - 채용공고: "채용공고", "구인", "일자리" → `job_posts`
 - 자격증: "자격증", "증명서" → `certificates`
 - 기술: "기술", "스킬" → `skills`
 - 로드맵: "로드맵", "학습경로" → `roadmaps`
 - 시각화: "분석", "통계", "차트" → `visualization`
 - 추천: "추천", "맞춤" → `job_recommendation`
-- 내 스킬 조회: "내 스킬", "보유 스킬", "내가 가진 스킬" → `get_my_skills`
-- 내 스킬 추가: "스킬 추가", "기술 추가" → `add_my_skills`
+- 내 스킬 조회: "내 스킬", "보유 스킬", "내가 가진 스킬", "[스킬명] 숙련도", "[스킬명] 레벨", "aws 숙련도", "파이썬 실력" → `get_my_skills`
+- 내 스킬 추가: **"스킬 추가", "기술 추가", "이력서에 스킬", "이력서에 기술", "이력서에 [스킬명] 추가", "[스킬명] 스킬 추가", "[스킬명] 추가"** → `add_my_skills`
+- 내 스킬 숙련도 변경: "[스킬명] 숙련도 변경", "[스킬명] 레벨 변경", "[스킬명]을 [숙련도]로", "숙련도를 [레벨]로 바꿔", "[스킬명] 수정" → `update_my_skill_proficiency`
 - 내 자격증 조회: "내 자격증", "보유 자격증" → `get_my_certificates`
-- 내 자격증 추가: "자격증 추가", "자격증 등록" → `add_my_certificates`
+- 내 자격증 추가: "자격증 추가", "자격증 등록", "이력서에 자격증", "이력서에 [자격증명] 추가" → `add_my_certificates`
+
+**중요**: "이력서에 [스킬명] 추가"는 반드시 `add_my_skills`로 분류해야 합니다. `update_resume`가 아닙니다!
 
 **응답 형식:**
 
@@ -221,6 +256,18 @@ class OpenRouterClient:
 - "프론트엔드 개발자 채용공고 찾아줘" → {{"intent": "job_posts", "parameters": {{"job_name": "프론트엔드 개발자"}}}}
 - "내 스킬들 조회하고 파이썬도 추가해줘" → {{"multiple_intents": true, "intents": [{{"intent": "get_my_skills", "parameters": {{}}, "description": "보유 스킬 조회"}}, {{"intent": "add_my_skills", "parameters": {{"skill_name": "파이썬"}}, "description": "파이썬 스킬 추가"}}]}}
 - "채용공고 보여주고 내 이력서도 확인해줘" → {{"multiple_intents": true, "intents": [{{"intent": "job_posts", "parameters": {{}}, "description": "채용공고 조회"}}, {{"intent": "get_my_resume", "parameters": {{}}, "description": "이력서 조회"}}]}}
+- "내 이력서에 파이썬 추가해줘" → {{"intent": "add_my_skills", "parameters": {{"skill_name": "파이썬"}}}}
+- "내 이력서에 파이썬 스킬 추가해줘" → {{"intent": "add_my_skills", "parameters": {{"skill_name": "파이썬"}}}}
+- "이력서에 자바스크립트 추가해줘" → {{"intent": "add_my_skills", "parameters": {{"skill_name": "자바스크립트"}}}}
+- "파이썬 스킬 추가해줘" → {{"intent": "add_my_skills", "parameters": {{"skill_name": "파이썬"}}}}
+- "React 추가해줘" → {{"intent": "add_my_skills", "parameters": {{"skill_name": "React"}}}}
+- "내 이력서 aws 숙련도가 어떻지?" → {{"intent": "get_my_skills", "parameters": {{"skill_name": "aws"}}}}
+- "파이썬 실력이 어느 정도야?" → {{"intent": "get_my_skills", "parameters": {{"skill_name": "파이썬"}}}}
+- "내 이력서에 스킬 aws를 숙련도를 상급으로 변경해줘" → {{"intent": "update_my_skill_proficiency", "parameters": {{"skill_name": "aws", "proficiency": "상급"}}}}
+- "파이썬 숙련도를 고급으로 바꿔줘" → {{"intent": "update_my_skill_proficiency", "parameters": {{"skill_name": "파이썬", "proficiency": "고급"}}}}
+- "React 레벨을 중급으로 수정해줘" → {{"intent": "update_my_skill_proficiency", "parameters": {{"skill_name": "React", "proficiency": "중급"}}}}
+- "이력서에 토익 자격증 추가해줘" → {{"intent": "add_my_certificates", "parameters": {{"certificate_name": "토익"}}}}
+- "이력서에 서울대학교 추가해줘" → {{"intent": "update_resume", "parameters": {{"university": "서울대학교"}}}}
 """
 
         messages: List[ChatCompletionMessageParam] = [

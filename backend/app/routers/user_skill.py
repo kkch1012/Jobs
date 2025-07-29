@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user_skill import UserSkill
@@ -9,6 +9,11 @@ from app.models.user import User
 from app.models.skill import Skill
 from app.utils.logger import app_logger
 import re
+from pydantic import BaseModel
+
+class UpdateSkillProficiencyRequest(BaseModel):
+    skill_name: str
+    proficiency: str
 
 router = APIRouter(prefix="/users/me/skills", tags=["UserSkill"])
 
@@ -123,23 +128,33 @@ def add_user_skill_by_name(
 - 인증된 사용자만 사용할 수 있습니다.
 """)
 def smart_add_user_skill(
-    skill_data: UserSkillCreate,
+    skill_data: dict,  # UserSkillCreate에서 dict로 변경
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # dict에서 데이터 추출
+    skill_name = skill_data.get("skill_name")
+    proficiency = skill_data.get("proficiency")
+    
+    if not skill_name:
+        return {
+            "status": "error",
+            "message": "스킬명을 입력해주세요."
+        }
+    
     # 스킬명 정규화
-    normalized_skill_name = normalize_skill_name(skill_data.skill_name)
+    normalized_skill_name = normalize_skill_name(skill_name)
     
     # 정규화된 스킬명으로 스킬 찾기
-    skill = find_similar_skill(db, skill_data.skill_name)
+    skill = find_similar_skill(db, skill_name)
     
     if not skill:
         # 정확히 일치하는 스킬이 없으면 원본명으로 다시 검색
-        skill = db.query(Skill).filter(Skill.name == skill_data.skill_name).first()
+        skill = db.query(Skill).filter(Skill.name == skill_name).first()
         if not skill:
             return {
                 "status": "skill_not_found",
-                "message": f"'{skill_data.skill_name}' 스킬을 찾을 수 없습니다. 정확한 스킬명을 입력해주세요.",
+                "message": f"'{skill_name}' 스킬을 찾을 수 없습니다. 정확한 스킬명을 입력해주세요.",
                 "normalized_name": normalized_skill_name
             }
     
@@ -160,7 +175,7 @@ def smart_add_user_skill(
         }
     
     # 숙련도가 없으면 입력 요청
-    if not skill_data.proficiency or skill_data.proficiency.strip() == "":
+    if not proficiency or proficiency.strip() == "":
         return {
             "status": "need_proficiency",
             "message": f"'{skill.name}' 스킬의 숙련도를 입력해주세요. (예: 초급, 중급, 고급, 또는 1-5점)",
@@ -172,7 +187,7 @@ def smart_add_user_skill(
     user_skill = UserSkill(
         user_id=current_user.id,
         skill_id=skill.id,
-        proficiency=skill_data.proficiency
+        proficiency=proficiency
     )
     db.add(user_skill)
     db.commit()
@@ -218,6 +233,47 @@ def update_skill_proficiency(
         "proficiency": proficiency
     }
 
+@router.put("/update-proficiency-by-name",
+            summary="스킬명으로 숙련도 업데이트", 
+            operation_id="update_skill_proficiency_by_name",
+            description="스킬명을 이용해 기존 스킬의 숙련도를 업데이트합니다.")
+def update_skill_proficiency_by_name(
+    request: UpdateSkillProficiencyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # 스킬명 정규화
+    normalized_skill = normalize_skill_name(request.skill_name)
+    
+    # 스킬 찾기
+    skill = find_similar_skill(db, normalized_skill)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"'{request.skill_name}' 스킬을 찾을 수 없습니다.")
+    
+    # 사용자의 해당 스킬 찾기
+    user_skill = (
+        db.query(UserSkill)
+          .filter(UserSkill.skill_id == skill.id, UserSkill.user_id == current_user.id)
+          .first()
+    )
+    
+    if not user_skill:
+        raise HTTPException(status_code=404, detail=f"'{skill.name}' 스킬을 보유하고 있지 않습니다.")
+    
+    # 숙련도 업데이트
+    old_proficiency = user_skill.proficiency
+    user_skill.proficiency = request.proficiency
+    db.commit()
+    db.refresh(user_skill)
+    
+    return {
+        "status": "success",
+        "message": f"'{skill.name}' 스킬의 숙련도가 '{old_proficiency}'에서 '{request.proficiency}'로 업데이트되었습니다.",
+        "skill_name": skill.name,
+        "old_proficiency": old_proficiency,
+        "new_proficiency": request.proficiency
+    }
+
 @router.get("/", 
             response_model=List[UserSkillResponse], 
             operation_id="get_user_skills",
@@ -225,18 +281,26 @@ def update_skill_proficiency(
 로그인한 사용자가 등록한 기술 목록을 조회합니다.
 
 - 인증된 사용자만 접근 가능
+- skill_name 파라미터로 특정 스킬만 조회 가능
 - 등록된 기술이 없으면 빈 리스트를 반환합니다.
 """)
 def get_user_skills(
+    skill_name: Optional[str] = Query(None, description="특정 스킬명으로 필터링 (선택사항)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    user_skills = (
+    query = (
         db.query(UserSkill, Skill.name.label("skill_name"))
           .join(Skill, UserSkill.skill_id == Skill.id)
           .filter(UserSkill.user_id == current_user.id)
-          .all()
     )
+    
+    # 특정 스킬명으로 필터링
+    if skill_name:
+        normalized_skill = normalize_skill_name(skill_name)
+        query = query.filter(Skill.name.ilike(f"%{normalized_skill}%"))
+    
+    user_skills = query.all()
     # 디버깅용 로그 출력
     app_logger.debug(f"사용자 스킬 조회: {len(user_skills)}개")
     # UserSkill 객체와 skill_name 튜플을 UserSkillResponse 리스트로 변환

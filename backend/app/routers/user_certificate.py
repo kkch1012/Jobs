@@ -102,10 +102,11 @@ def delete_user_certificate(
 - 인증된 사용자만 사용할 수 있습니다.
 """)
 def smart_add_user_certificate(
-    cert_data: dict,
+    cert_data: dict,  # UserCertificateCreate에서 dict로 변경
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # dict에서 데이터 추출
     certificate_name = cert_data.get("certificate_name")
     acquired_date_str = cert_data.get("acquired_date")
     

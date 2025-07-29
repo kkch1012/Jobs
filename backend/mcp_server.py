@@ -310,10 +310,15 @@ AVAILABLE_TOOLS = {
     ),
     "get_my_skills": MCPTool(
         name="get_my_skills",
-        description="내 보유 스킬 목록을 조회합니다",
+        description="내 보유 스킬 목록을 조회합니다 (특정 스킬 검색 가능)",
         inputSchema={
             "type": "object",
-            "properties": {}
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "특정 스킬명 (선택사항, 없으면 전체 조회)"
+                }
+            }
         },
         outputSchema={
             "type": "object",
@@ -366,19 +371,50 @@ AVAILABLE_TOOLS = {
         inputSchema={
             "type": "object",
             "properties": {
-                "certificate_name": {"type": "string", "description": "자격증명 (한글/영어 모두 지원)"},
-                "acquired_date": {"type": "string", "description": "취득일 (YYYY-MM-DD 형식 또는 '오늘')"}
+                "certificate_name": {
+                    "type": "string",
+                    "description": "추가할 자격증명"
+                },
+                "acquired_date": {
+                    "type": "string",
+                    "description": "취득일 (YYYY-MM-DD 형식, 선택사항)"
+                }
             },
             "required": ["certificate_name"]
         },
         outputSchema={
             "type": "object",
             "properties": {
-                "status": {"type": "string", "description": "처리 상태 (success/duplicate/need_acquired_date/certificate_not_found)"},
-                "message": {"type": "string", "description": "결과 메시지"},
-                "certificate_name": {"type": "string", "description": "자격증명"},
-                "acquired_date": {"type": "string", "description": "취득일"},
-                "certificate_id": {"type": "integer", "description": "자격증 ID (중복/업데이트시)"}
+                "status": {"type": "string"},
+                "message": {"type": "string"}
+            }
+        }
+    ),
+    "update_my_skill_proficiency": MCPTool(
+        name="update_my_skill_proficiency",
+        description="기존 보유 스킬의 숙련도를 업데이트합니다",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string", 
+                    "description": "숙련도를 변경할 스킬명"
+                },
+                "proficiency": {
+                    "type": "string",
+                    "description": "새로운 숙련도 (초급/중급/고급)"
+                }
+            },
+            "required": ["skill_name", "proficiency"]
+        },
+        outputSchema={
+            "type": "object", 
+            "properties": {
+                "status": {"type": "string"},
+                "message": {"type": "string"},
+                "skill_name": {"type": "string"},
+                "old_proficiency": {"type": "string"},
+                "new_proficiency": {"type": "string"}
             }
         }
     )
@@ -415,18 +451,37 @@ class FastAPIClient:
             url = f"{self.base_url}{endpoint}"
             request_headers = headers or {}
             
+            print(f"[DEBUG] 요청 URL: {url}")
+            print(f"[DEBUG] 요청 파라미터: {params}")
+            print(f"[DEBUG] 요청 헤더: {request_headers}")
+            
             if params:
                 # GET 요청의 경우 쿼리 파라미터로 전달
                 response = await self.client.get(url, params=params, headers=request_headers, follow_redirects=True)
             else:
                 response = await self.client.get(url, headers=request_headers, follow_redirects=True)
             
+            print(f"[DEBUG] 응답 상태코드: {response.status_code}")
+            print(f"[DEBUG] 응답 내용: {response.text[:500]}")
+            
             if response.status_code == 200:
                 return response.json()
             else:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
+                error_detail = f"HTTP {response.status_code}: {response.text}"
+                print(f"[ERROR] API 호출 실패: {error_detail}")
+                raise HTTPException(status_code=response.status_code, detail=error_detail)
+        except httpx.RequestError as e:
+            error_detail = f"네트워크 요청 실패: {str(e)}"
+            print(f"[ERROR] 네트워크 에러: {error_detail}")
+            raise HTTPException(status_code=500, detail=error_detail)
+        except httpx.HTTPStatusError as e:
+            error_detail = f"HTTP 상태 에러: {e.response.status_code} - {e.response.text}"
+            print(f"[ERROR] HTTP 상태 에러: {error_detail}")
+            raise HTTPException(status_code=e.response.status_code, detail=error_detail)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"FastAPI 서버 호출 실패: {str(e)}")
+            error_detail = f"예상치 못한 에러: {type(e).__name__}: {str(e)}"
+            print(f"[ERROR] 예상치 못한 에러: {error_detail}")
+            raise HTTPException(status_code=500, detail=error_detail)
     
     async def put_api(self, endpoint: str, data: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """FastAPI 서버의 PUT 엔드포인트를 호출합니다."""
@@ -499,13 +554,11 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "visualization": "/visualization/weekly_skill_frequency",
             "get_my_resume": "/users/me/resume",
             "update_resume": "/users/me/resume",
-            "job_recommendation": "/recommend/jobs",
-            "gap_analysis": "/visualization/gap-analysis",
-            "skill_search": "/visualization/skill_search",
+            "job_recommendation": "/recommend/job/simple",
+            "gap_analysis": "/visualization/gap_analysis",
             "roadmap_recommendations": "/visualization/roadmap_recommendations",
-            "roadmap_recommendations_direct": "/visualization/roadmap_recommendations/direct",
+            "roadmap_recommendations_direct": "/visualization/roadmap_recommendations_direct",
             "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend",
-            "page_move": "/mcp/page-move",
             "get_my_skills": "/users/me/skills",
             "add_my_skills": "/users/me/skills/smart-add",
             "get_my_certificates": "/users/me/certificates",
@@ -543,7 +596,13 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             
             for arg_key, resume_key in field_mapping.items():
                 if arg_key in arguments and arguments[arg_key] is not None:
-                    resume_data[resume_key] = arguments[arg_key]
+                    value = arguments[arg_key]
+                    
+                    # skills와 certificates는 배열이어야 하므로 문자열이면 배열로 변환
+                    if arg_key in ["skills", "certificates"] and isinstance(value, str):
+                        value = [value]
+                    
+                    resume_data[resume_key] = value
             
             # 1단계: 현재 이력서 조회
             try:
@@ -717,7 +776,7 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                 page_data = {"resume": resume_data}
             elif target_page == "recommendations":
                 # 추천 데이터
-                recommend_data = await fastapi_client.call_api("/recommend/jobs", headers=headers)
+                recommend_data = await fastapi_client.call_api("/recommend/job/simple", headers=headers)
                 page_data = {"recommendations": recommend_data}
             
             result = {
@@ -735,7 +794,12 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             ])
         elif tool_name == "get_my_skills":
             try:
-                skills_data = await fastapi_client.call_api(endpoint, headers=headers)
+                arguments = request.arguments
+                skill_name = arguments.get("skill_name", "")
+                if skill_name:
+                    skills_data = await fastapi_client.call_api(endpoint, {"skill_name": skill_name}, headers=headers)
+                else:
+                    skills_data = await fastapi_client.call_api(endpoint, headers=headers)
                 return ToolCallResponse(content=[
                     {
                         "type": "text",
@@ -793,6 +857,24 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                 ])
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"내 자격증 추가 실패: {str(e)}")
+        elif tool_name == "update_my_skill_proficiency":
+            try:
+                arguments = request.arguments
+                skill_name = arguments.get("skill_name")
+                proficiency = arguments.get("proficiency")
+
+                if not skill_name or not proficiency:
+                    raise HTTPException(status_code=400, detail="skill_name과 proficiency 모두 필요합니다.")
+
+                result = await fastapi_client.put_api(endpoint, {"skill_name": skill_name, "proficiency": proficiency}, headers=headers)
+                return ToolCallResponse(content=[
+                    {
+                        "type": "text",
+                        "text": json.dumps(result, ensure_ascii=False)
+                    }
+                ])
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"스킬 숙련도 업데이트 실패: {str(e)}")
         else:
             # GET 요청으로 처리
             # job_recommendation은 인증이 필요하고 쿼리 파라미터가 없음
@@ -854,17 +936,18 @@ async def chat_with_mcp(request: MCPRequest):
                 "visualization": "/visualization/weekly_skill_frequency",
                 "get_my_resume": "/users/me/resume",
                 "update_resume": "/users/me/resume",
-                "job_recommendation": "/recommend/jobs",
-                "gap_analysis": "/visualization/gap-analysis",
+                "job_recommendation": "/recommend/job/simple",
+                "gap_analysis": "/visualization/gap_analysis",
                 "skill_search": "/visualization/skill_search",
                 "roadmap_recommendations": "/visualization/roadmap_recommendations",
-                "roadmap_recommendations_direct": "/visualization/roadmap_recommendations/direct",
+                "roadmap_recommendations_direct": "/visualization/roadmap_recommendations_direct",
                 "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend",
                 "page_move": "/mcp/page-move",
                 "get_my_skills": "/users/me/skills",
                 "add_my_skills": "/users/me/skills",
                 "get_my_certificates": "/users/me/certificates",
-                "add_my_certificates": "/users/me/certificates"
+                "add_my_certificates": "/users/me/certificates",
+                "update_my_skill_proficiency": "/users/me/skills/update-proficiency-by-name"
             }
             
             endpoint = endpoint_mapping.get(tool_name)
@@ -876,7 +959,7 @@ async def chat_with_mcp(request: MCPRequest):
             
             # FastAPI 서버 호출 (인증이 필요한 엔드포인트는 헤더 전달)
             headers = {}
-            if tool_name in ["job_recommendation", "get_my_resume", "gap_analysis", "roadmap_recommendations", "roadmap_recommendations_direct", "resume_vs_job_skill_trend", "get_my_skills", "add_my_skills", "get_my_certificates", "add_my_certificates"]:
+            if tool_name in ["job_recommendation", "get_my_resume", "gap_analysis", "roadmap_recommendations", "roadmap_recommendations_direct", "resume_vs_job_skill_trend", "get_my_skills", "add_my_skills", "get_my_certificates", "add_my_certificates", "update_my_skill_proficiency"]:
                 # 인증이 필요한 엔드포인트는 authorization 헤더 필요
                 # MCP 채팅에서는 인증 토큰을 별도로 받아야 함
                 return MCPResponse(
@@ -923,10 +1006,20 @@ async def chat_with_mcp(request: MCPRequest):
                     field = arguments.get('field', 'tech_stack')
                     answer = f"'{job_name}' 직무의 {field} 주간 스킬 빈도 데이터가 없습니다."
             elif tool_name == "job_recommendation":
-                if isinstance(api_result, dict) and "recommendation" in api_result:
-                    answer = clean_markdown_text(api_result["recommendation"])
+                if isinstance(api_result, dict):
+                    if "recommended_job" in api_result:
+                        recommended_job = api_result["recommended_job"]
+                        if recommended_job:
+                            answer = f"추천 직무: {recommended_job}"
+                        else:
+                            answer = "현재 보유한 스킬로는 적합한 직무를 찾을 수 없습니다."
+                    elif "recommendation" in api_result:
+                        # 기존 형식도 지원
+                        answer = clean_markdown_text(api_result["recommendation"])
+                    else:
+                        answer = "직무 추천을 받을 수 없습니다."
                 else:
-                    answer = "채용공고 추천을 받을 수 없습니다."
+                    answer = "직무 추천을 받을 수 없습니다."
             elif tool_name == "page_move":
                 if isinstance(api_result, dict) and "target_page" in api_result:
                     target_page = api_result["target_page"]
@@ -935,10 +1028,18 @@ async def chat_with_mcp(request: MCPRequest):
                 else:
                     answer = "페이지 이동을 처리할 수 없습니다."
             elif tool_name == "get_my_skills":
-                if isinstance(api_result, list) and len(api_result) > 0:
-                    answer = f"보유 스킬을 {len(api_result)}개 찾았습니다."
+                if isinstance(api_result, list):
+                    skill_name = arguments.get("skill_name", "")
+                    if skill_name and len(api_result) > 0:
+                        answer = f"'{skill_name}' 스킬 정보를 찾았습니다."
+                    elif skill_name and len(api_result) == 0:
+                        answer = f"'{skill_name}' 스킬을 찾을 수 없습니다."
+                    elif len(api_result) > 0:
+                        answer = f"보유 스킬을 {len(api_result)}개 찾았습니다."
+                    else:
+                        answer = "보유 스킬이 없습니다."
                 else:
-                    answer = "보유 스킬이 없습니다."
+                    answer = "보유 스킬을 조회할 수 없습니다."
             elif tool_name == "add_my_skills":
                 if isinstance(api_result, dict) and "status" in api_result:
                     status = api_result["status"]
@@ -983,6 +1084,20 @@ async def chat_with_mcp(request: MCPRequest):
                         answer = f"자격증 추가 실패: {message}"
                 else:
                     answer = "자격증 추가를 처리할 수 없습니다."
+            elif tool_name == "update_my_skill_proficiency":
+                if isinstance(api_result, dict) and "status" in api_result:
+                    status = api_result["status"]
+                    message = api_result["message"]
+                    skill_name = api_result.get("skill_name")
+                    old_proficiency = api_result.get("old_proficiency")
+                    new_proficiency = api_result.get("new_proficiency")
+
+                    if status == "success":
+                        answer = f"'{skill_name}' 스킬의 숙련도가 '{old_proficiency}'에서 '{new_proficiency}'로 변경되었습니다."
+                    else:
+                        answer = f"스킬 숙련도 업데이트 실패: {message}"
+                else:
+                    answer = "스킬 숙련도 업데이트를 처리할 수 없습니다."
             elif tool_name in ["job_posts", "certificates", "skills", "roadmaps"]:
                 if isinstance(api_result, list) and len(api_result) > 0:
                     answer = f"{tool_name.replace('_', ' ').title()}를 {len(api_result)}개 찾았습니다!"
