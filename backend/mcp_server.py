@@ -562,7 +562,8 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "get_my_skills": "/users/me/skills",
             "add_my_skills": "/users/me/skills/smart-add",
             "get_my_certificates": "/users/me/certificates",
-            "add_my_certificates": "/users/me/certificates/smart-add"
+            "add_my_certificates": "/users/me/certificates/smart-add",
+            "update_my_skill_proficiency": "/users/me/skills/update-proficiency-by-name"
         }
         
         endpoint = endpoint_mapping.get(tool_name)
@@ -866,6 +867,7 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                 if not skill_name or not proficiency:
                     raise HTTPException(status_code=400, detail="skill_name과 proficiency 모두 필요합니다.")
 
+                endpoint = "/users/me/skills/update-proficiency-by-name"
                 result = await fastapi_client.put_api(endpoint, {"skill_name": skill_name, "proficiency": proficiency}, headers=headers)
                 return ToolCallResponse(content=[
                     {
@@ -944,9 +946,9 @@ async def chat_with_mcp(request: MCPRequest):
                 "resume_vs_job_skill_trend": "/visualization/resume_vs_job_skill_trend",
                 "page_move": "/mcp/page-move",
                 "get_my_skills": "/users/me/skills",
-                "add_my_skills": "/users/me/skills",
+                "add_my_skills": "/users/me/skills/smart-add",
                 "get_my_certificates": "/users/me/certificates",
-                "add_my_certificates": "/users/me/certificates",
+                "add_my_certificates": "/users/me/certificates/smart-add",
                 "update_my_skill_proficiency": "/users/me/skills/update-proficiency-by-name"
             }
             
