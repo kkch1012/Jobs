@@ -133,6 +133,11 @@ class OpenRouterClient:
 **API별 파라미터 정보:**
 {json.dumps(api_parameters, ensure_ascii=False, indent=2)}
 
+**다중 Intent 처리:**
+- 사용자 메시지에 2개 이상의 서로 다른 의도가 포함된 경우, 모든 의도를 감지하여 배열로 반환하세요
+- 예: "내 스킬들 조회하고 파이썬도 추가해줘" → 2개 intent: get_my_skills, add_my_skills
+- 예: "채용공고 보여주고 내 이력서도 확인해줘" → 2개 intent: job_posts, get_my_resume
+
 **중요한 파라미터 추출 규칙:**
 1. **직무명 추출**: 
    - "프론트엔드 개발자", "백엔드 엔지니어", "데이터 사이언티스트", "PM", "UI/UX 디자이너" 등
@@ -159,6 +164,14 @@ class OpenRouterClient:
    - "어학점수", "TOEIC", "IELTS" → language_score 파라미터 추출
    - "경력", "연차" → working_year 파라미터 추출
 
+7. **스킬 관련 파라미터**:
+   - "스킬 추가", "기술 추가" → skill_name, proficiency 파라미터 추출
+   - "스킬 조회", "스킬 보여줘" → get_my_skills
+
+8. **자격증 관련 파라미터**:
+   - "자격증 추가", "자격증 등록" → certificate_name, acquired_date 파라미터 추출
+   - "자격증 조회", "자격증 보여줘" → get_my_certificates
+
 **Intent 분류 규칙:**
 - 이력서 관련: "내 이력서", "이력서 보여줘" → `get_my_resume`
 - 이력서 수정: "이력서 수정", "이력서 업데이트" → `update_resume`
@@ -168,8 +181,14 @@ class OpenRouterClient:
 - 로드맵: "로드맵", "학습경로" → `roadmaps`
 - 시각화: "분석", "통계", "차트" → `visualization`
 - 추천: "추천", "맞춤" → `job_recommendation`
+- 내 스킬 조회: "내 스킬", "보유 스킬", "내가 가진 스킬" → `get_my_skills`
+- 내 스킬 추가: "스킬 추가", "기술 추가" → `add_my_skills`
+- 내 자격증 조회: "내 자격증", "보유 자격증" → `get_my_certificates`
+- 내 자격증 추가: "자격증 추가", "자격증 등록" → `add_my_certificates`
 
 **응답 형식:**
+
+**단일 Intent인 경우:**
 {{
     "intent": "API 이름 또는 'general'",
     "confidence": 0.0-1.0,
@@ -179,12 +198,29 @@ class OpenRouterClient:
     "reasoning": "분석 근거"
 }}
 
+**다중 Intent인 경우:**
+{{
+    "multiple_intents": true,
+    "intents": [
+        {{
+            "intent": "첫번째_API",
+            "parameters": {{"파라미터": "값"}},
+            "description": "첫번째 작업 설명"
+        }},
+        {{
+            "intent": "두번째_API", 
+            "parameters": {{"파라미터": "값"}},
+            "description": "두번째 작업 설명"
+        }}
+    ],
+    "confidence": 0.0-1.0,
+    "reasoning": "다중 의도 분석 근거"
+}}
+
 **예시:**
 - "프론트엔드 개발자 채용공고 찾아줘" → {{"intent": "job_posts", "parameters": {{"job_name": "프론트엔드 개발자"}}}}
-- "Python, React 사용하는 백엔드 개발자 구인" → {{"intent": "job_posts", "parameters": {{"job_name": "백엔드 개발자", "tech_stack": "Python, React"}}}}
-- "네이버에서 신입 개발자 채용" → {{"intent": "job_posts", "parameters": {{"company_name": "네이버", "applicant_type": "신입", "job_name": "개발자"}}}}
-- "내 희망직무에 서버 개발자도 추가해줘" → {{"intent": "update_resume", "parameters": {{"job_name": "서버 개발자"}}}}
-- "이력서에 서울대학교 컴퓨터공학과 추가" → {{"intent": "update_resume", "parameters": {{"university": "서울대학교", "major": "컴퓨터공학과"}}}}
+- "내 스킬들 조회하고 파이썬도 추가해줘" → {{"multiple_intents": true, "intents": [{{"intent": "get_my_skills", "parameters": {{}}, "description": "보유 스킬 조회"}}, {{"intent": "add_my_skills", "parameters": {{"skill_name": "파이썬"}}, "description": "파이썬 스킬 추가"}}]}}
+- "채용공고 보여주고 내 이력서도 확인해줘" → {{"multiple_intents": true, "intents": [{{"intent": "job_posts", "parameters": {{}}, "description": "채용공고 조회"}}, {{"intent": "get_my_resume", "parameters": {{}}, "description": "이력서 조회"}}]}}
 """
 
         messages: List[ChatCompletionMessageParam] = [

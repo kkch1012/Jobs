@@ -4,7 +4,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from app.utils.logger import app_logger
 from app.database import get_db
-from app.models.mongo import MCPMessage
+from app.models.mongo import MCPMessage, MultipleIntentSession, IntentItem
 from app.schemas.mcp import MessageIn
 from app.services.mcp_client import mcp_client
 from app.services.llm_client import llm_client
@@ -56,13 +56,32 @@ API_INTENT_PARAMETERS = {
         "parameters": {
             "top_n": 20
         }
+    },
+    "get_my_skills": {
+        "parameters": {}
+    },
+    "add_my_skills": {
+        "parameters": {
+            "skill_name": None,
+            "proficiency": None
+        }
+    },
+    "get_my_certificates": {
+        "parameters": {}
+    },
+    "add_my_certificates": {
+        "parameters": {
+            "certificate_name": None,
+            "acquired_date": None
+        }
     }
 }
 
 # intent 목록
 INTENT_LIST = [
     "job_posts", "certificates", "skills", "roadmaps", "visualization",
-    "get_my_resume", "update_resume", "page_move", "job_recommendation", "general"
+    "get_my_resume", "update_resume", "page_move", "job_recommendation", 
+    "get_my_skills", "add_my_skills", "get_my_certificates", "add_my_certificates", "general"
 ]
 
 def merge_parameters_with_defaults(extracted_params: Dict[str, Any], api_type: str) -> Dict[str, Any]:
@@ -203,6 +222,79 @@ async def generate_llm_summary(intent: str, mcp_result: Dict[str, Any], model: s
     llm_summary = await llm_client.chat_completion(messages, model=model)
     return (llm_summary or "요약 생성 실패").strip()
 
+async def execute_single_intent(
+    intent: str, 
+    parameters: Dict[str, Any], 
+    current_user: Optional[User], 
+    request: Request,
+    db: Session
+) -> Dict[str, Any]:
+    """단일 intent를 실행하고 결과를 반환합니다."""
+    
+    # 도구 호출이 필요한 intent 처리
+    if intent in ["job_posts", "certificates", "skills", "roadmaps", "visualization"]:
+        # LLM이 추출한 파라미터를 기본값과 병합
+        parameters = merge_parameters_with_defaults(parameters, intent)
+        return await mcp_client.call_tool(intent, parameters)
+    
+    # 인증이 필요한 intent 처리
+    elif intent in ["get_my_resume", "update_resume", "job_recommendation", "get_my_skills", "add_my_skills", "get_my_certificates", "add_my_certificates"]:
+        if not current_user:
+            raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+        
+        # 인증 토큰 추출
+        auth_header = request.headers.get("authorization")
+        if not auth_header:
+            raise HTTPException(status_code=401, detail="인증 토큰이 필요합니다.")
+        
+        # intent별 특수 처리
+        if intent == "get_my_resume":
+            requested_field = parameters.get("requested_field")
+            return await mcp_client.get_my_resume(auth_header, requested_field)
+        
+        elif intent == "get_my_skills":
+            return await mcp_client.call_tool_with_auth(intent, {}, auth_header)
+        
+        elif intent == "add_my_skills":
+            skill_name = parameters.get("skill_name")
+            proficiency = parameters.get("proficiency")
+            
+            if not skill_name:
+                raise ValueError("스킬명이 필요합니다.")
+            
+            skill_params = {
+                "skill_name": skill_name,
+                "proficiency": proficiency or ""
+            }
+            return await mcp_client.call_tool_with_auth(intent, skill_params, auth_header)
+        
+        elif intent == "get_my_certificates":
+            return await mcp_client.call_tool_with_auth(intent, {}, auth_header)
+        
+        elif intent == "add_my_certificates":
+            cert_name = parameters.get("certificate_name")
+            acquired_date = parameters.get("acquired_date")
+            
+            if not cert_name:
+                raise ValueError("자격증명이 필요합니다.")
+            
+            cert_params = {
+                "certificate_name": cert_name,
+                "acquired_date": acquired_date or ""
+            }
+            return await mcp_client.call_tool_with_auth(intent, cert_params, auth_header)
+        
+        elif intent == "job_recommendation":
+            parameters = merge_parameters_with_defaults(parameters, intent)
+            return await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
+        
+        else:
+            return await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
+    
+    else:
+        # 일반 대화나 알 수 없는 intent
+        raise ValueError(f"지원하지 않는 intent: {intent}")
+
 def create_error_response(session_id: int, error_content: str, status_code: int = 500, action: Optional[str] = None) -> JSONResponse:
     """에러 응답을 생성합니다."""
     response_content = {"error": error_content}
@@ -236,7 +328,165 @@ async def chat_with_llm(
         # 1. LLM으로 intent 분석
         try:
             app_logger.debug(f"LLM intent 분석 시작: message='{data.message[:50]}...'")
+            
+            # 숫자 선택 처리 (1, 2, 3 등)
+            if data.message.strip().isdigit():
+                choice_num = int(data.message.strip())
+                app_logger.debug(f"숫자 선택 감지: {choice_num}")
+                
+                # 이전 다중 intent 세션 찾기
+                try:
+                    session_doc = await MultipleIntentSession.find_one({"session_id": data.session_id})
+                    
+                    if session_doc and 1 <= choice_num <= len(session_doc.intents):
+                        app_logger.info(f"사용자가 {choice_num}번부터 순차 실행 선택")
+                        
+                        # 선택된 번호부터 순서대로 실행
+                        results = []
+                        start_index = choice_num - 1  # 0-based index
+                        
+                        for i in range(start_index, len(session_doc.intents)):
+                            intent_item = session_doc.intents[i]
+                            intent = intent_item.intent
+                            parameters = intent_item.parameters
+                            description = intent_item.description
+                            
+                            app_logger.debug(f"실행 중: {i+1}번 - {intent} ({description})")
+                            
+                            try:
+                                # 각 intent별 MCP 호출 로직
+                                mcp_result = await execute_single_intent(
+                                    intent, parameters, current_user, request, db
+                                )
+                                
+                                # LLM 요약 생성
+                                summary = await generate_llm_summary(intent, mcp_result, model)
+                                
+                                results.append({
+                                    "step": i + 1,
+                                    "intent": intent,
+                                    "description": description,
+                                    "summary": summary,
+                                    "success": True
+                                })
+                                
+                            except Exception as e:
+                                app_logger.error(f"{i+1}번 작업 실행 실패: {str(e)}")
+                                results.append({
+                                    "step": i + 1,
+                                    "intent": intent,
+                                    "description": description,
+                                    "summary": f"작업 실행 중 오류가 발생했습니다: {str(e)}",
+                                    "success": False
+                                })
+                        
+                        # 전체 결과 종합
+                        total_steps = len(results)
+                        success_steps = sum(1 for r in results if r["success"])
+                        
+                        final_answer = f"📋 {choice_num}번부터 순차적으로 {total_steps}개 작업을 실행했습니다!\n"
+                        final_answer += f"✅ 성공: {success_steps}개 / ❌ 실패: {total_steps - success_steps}개\n\n"
+                        
+                        for result in results:
+                            status = "✅" if result["success"] else "❌"
+                            final_answer += f"{status} {result['step']}. {result['description']}\n"
+                            final_answer += f"   → {result['summary']}\n\n"
+                        
+                        # 세션 정리
+                        await session_doc.delete()
+                        
+                        # 최종 응답 저장
+                        try:
+                            await save_message_to_mongo(data.session_id, "assistant", final_answer)
+                        except Exception as e:
+                            app_logger.error(f"순차 실행 결과 저장 실패: {str(e)}")
+                        
+                        return {
+                            "answer": final_answer,
+                            "intent": "sequential_execution",
+                            "parameters": {},
+                            "executed_steps": results,
+                            "total_steps": total_steps,
+                            "success_steps": success_steps
+                        }
+                    
+                    else:
+                        # 유효하지 않은 선택
+                        if session_doc:
+                            error_msg = f"올바른 번호를 선택해주세요. (1-{len(session_doc.intents)} 중 선택)"
+                        else:
+                            error_msg = "선택할 수 있는 작업이 없습니다. 다시 요청해주세요."
+                        
+                        try:
+                            await save_message_to_mongo(data.session_id, "assistant", error_msg)
+                        except:
+                            pass
+                        
+                        return {
+                            "answer": error_msg,
+                            "intent": "error",
+                            "parameters": {}
+                        }
+                        
+                except Exception as e:
+                    app_logger.error(f"다중 intent 세션 조회 실패: {str(e)}")
+                    # 숫자이지만 다중 intent가 아닌 경우 일반 분석으로 진행
+            
             intent_json = await llm_client.analyze_intent(data.message, INTENT_LIST)
+            
+            # 다중 intent 처리
+            if intent_json.get("multiple_intents"):
+                app_logger.debug(f"다중 intent 감지: {len(intent_json.get('intents', []))}개")
+                
+                # 사용자에게 선택 옵션 제공
+                intents_list = intent_json.get("intents", [])
+                if len(intents_list) > 1:
+                    # MultipleIntentSession에 저장
+                    intent_items = [
+                        IntentItem(
+                            intent=item.get("intent", "unknown"),
+                            parameters=item.get("parameters", {}),
+                            description=item.get("description", item.get("intent", "unknown"))
+                        )
+                        for item in intents_list
+                    ]
+                    
+                    # 기존 세션 삭제 후 새로 저장
+                    await MultipleIntentSession.find({"session_id": data.session_id}).delete()
+                    
+                    session_doc = MultipleIntentSession(
+                        session_id=data.session_id,
+                        intents=intent_items,
+                        created_at=datetime.utcnow(),
+                        executed_count=0
+                    )
+                    await session_doc.insert()
+                    
+                    options_text = "여러 가지 요청이 있네요! 어떤 번호부터 순서대로 실행할까요?\n\n"
+                    
+                    for i, intent_item in enumerate(intent_items, 1):
+                        description = intent_item.description
+                        options_text += f"{i}. {description}\n"
+                    
+                    options_text += f"\n번호를 선택하면 해당 번호부터 순서대로 {len(intent_items)}개 작업을 모두 실행합니다!"
+                    options_text += "\n예: 2번 선택 → 2번, 3번 순서대로 실행"
+                    options_text += "\n\n번호를 선택해주세요! (예: 1)"
+                    
+                    # 선택 옵션 메시지 저장
+                    try:
+                        await save_message_to_mongo(data.session_id, "assistant", options_text)
+                    except Exception as e:
+                        app_logger.error(f"다중 intent 선택 메시지 저장 실패: {str(e)}")
+                    
+                    return {
+                        "answer": options_text,
+                        "intent": "multiple_choice",
+                        "multiple_intents": intents_list,
+                        "parameters": {},
+                        "action": "choose_intent"
+                    }
+            
+            # 단일 intent 처리 (기존 로직)
             intent = intent_json.get("intent", "general")
             parameters = intent_json.get("parameters", {})
             app_logger.debug(f"LLM intent 분석 성공: intent={intent}, parameters={parameters}")
@@ -263,7 +513,7 @@ async def chat_with_llm(
                 return create_error_response(data.session_id, error_content)
 
         # 3. 인증이 필요한 intent 처리
-        elif intent in ["get_my_resume", "update_resume", "job_recommendation"]:
+        elif intent in ["get_my_resume", "update_resume", "job_recommendation", "get_my_skills", "add_my_skills", "get_my_certificates", "add_my_certificates"]:
             if not current_user:
                 error_content = "로그인이 필요합니다."
                 try:
@@ -299,6 +549,46 @@ async def chat_with_llm(
                 if intent == "get_my_resume":
                     requested_field = parameters.get("requested_field")
                     mcp_result = await mcp_client.get_my_resume(auth_header, requested_field)
+                elif intent == "get_my_skills":
+                    mcp_result = await mcp_client.call_tool_with_auth(intent, {}, auth_header)
+                elif intent == "add_my_skills":
+                    # 스킬명과 숙련도 파라미터 추출
+                    skill_name = parameters.get("skill_name")
+                    proficiency = parameters.get("proficiency")
+                    
+                    if not skill_name:
+                        # LLM이 스킬명을 추출하지 못한 경우 메시지에서 다시 추출 시도
+                        import re
+                        skill_matches = re.findall(r'([가-힣a-zA-Z\+\#\.]+(?:\s*[가-힣a-zA-Z\+\#\.]*)*)', data.message)
+                        possible_skills = [s for s in skill_matches if len(s) > 1 and s.lower() not in ['스킬', '추가', '해줘', '스택', '기술']]
+                        if possible_skills:
+                            skill_name = possible_skills[0]
+                    
+                    skill_params = {
+                        "skill_name": skill_name,
+                        "proficiency": proficiency or ""
+                    }
+                    mcp_result = await mcp_client.call_tool_with_auth(intent, skill_params, auth_header)
+                elif intent == "get_my_certificates":
+                    mcp_result = await mcp_client.call_tool_with_auth(intent, {}, auth_header)
+                elif intent == "add_my_certificates":
+                    # 자격증명과 취득일 파라미터 추출
+                    cert_name = parameters.get("certificate_name")
+                    acquired_date = parameters.get("acquired_date")
+                    
+                    if not cert_name:
+                        # LLM이 자격증명을 추출하지 못한 경우 메시지에서 다시 추출 시도
+                        import re
+                        cert_matches = re.findall(r'([가-힣a-zA-Z\+\#\.]+(?:\s*[가-힣a-zA-Z\+\#\.]*)*)', data.message)
+                        possible_certs = [c for c in cert_matches if len(c) > 1 and c.lower() not in ['자격증', '추가', '해줘', '취득', '등록']]
+                        if possible_certs:
+                            cert_name = possible_certs[0]
+                    
+                    cert_params = {
+                        "certificate_name": cert_name,
+                        "acquired_date": acquired_date or ""
+                    }
+                    mcp_result = await mcp_client.call_tool_with_auth(intent, cert_params, auth_header)
                 else:
                     mcp_result = await mcp_client.call_tool_with_auth(intent, parameters, auth_header)
             except Exception as e:
