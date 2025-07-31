@@ -21,6 +21,8 @@ services:
       - ACCESS_TOKEN_EXPIRE_MINUTES=60
       - BATCH_SCHEDULE_HOUR=8
       - BATCH_SCHEDULE_MINUTE=0
+    volumes:
+      - ./backend:/app  # 개발용 볼륨 마운트 추가
     depends_on:
       - postgres
       - mongo
@@ -45,6 +47,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - SECRET_KEY=${SECRET_KEY:-SUPERSECRETKEY}
+    volumes:
+      - ./backend:/app  # 개발용 볼륨 마운트 추가
     depends_on:
       - postgres
       - mongo

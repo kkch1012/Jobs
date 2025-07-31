@@ -554,7 +554,7 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
             "visualization": "/visualization/weekly_skill_frequency",
             "get_my_resume": "/users/me/resume",
             "update_resume": "/users/me/resume",
-            "job_recommendation": "/recommend/job/simple",
+            "job_recommendation": "/recommend/jobs/ids",
             "gap_analysis": "/visualization/gap_analysis",
             "roadmap_recommendations": "/visualization/roadmap_recommendations",
             "roadmap_recommendations_direct": "/visualization/roadmap_recommendations_direct",
@@ -776,8 +776,8 @@ async def call_tool(tool_name: str, request: ToolCallRequest):
                 resume_data = await fastapi_client.call_api("/users/me/resume", headers=headers)
                 page_data = {"resume": resume_data}
             elif target_page == "recommendations":
-                # 추천 데이터
-                recommend_data = await fastapi_client.call_api("/recommend/job/simple", headers=headers)
+                # 추천 데이터 (채용공고 추천)
+                recommend_data = await fastapi_client.call_api("/recommend/jobs/ids", headers=headers)
                 page_data = {"recommendations": recommend_data}
             
             result = {
@@ -938,7 +938,7 @@ async def chat_with_mcp(request: MCPRequest):
                 "visualization": "/visualization/weekly_skill_frequency",
                 "get_my_resume": "/users/me/resume",
                 "update_resume": "/users/me/resume",
-                "job_recommendation": "/recommend/job/simple",
+                "job_recommendation": "/recommend/jobs/ids",
                 "gap_analysis": "/visualization/gap_analysis",
                 "skill_search": "/visualization/skill_search",
                 "roadmap_recommendations": "/visualization/roadmap_recommendations",
