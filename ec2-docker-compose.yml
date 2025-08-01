@@ -129,6 +129,23 @@ services:
       timeout: 10s
       retries: 3
 
+  # pgAdmin (PostgreSQL 관리용)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: jobs_pgadmin_prod
+    ports:
+      - "8080:80"
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=admin
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - postgres
+    networks:
+      - jobs_network
+    restart: unless-stopped
+
 networks:
   jobs_network:
     driver: bridge
@@ -139,4 +156,6 @@ volumes:
   mongo_data:
     driver: local
   redis_data:
+    driver: local
+  pgadmin_data:
     driver: local 
